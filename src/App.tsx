@@ -215,26 +215,50 @@ export default function App() {
           config: { responseMimeType: "application/json" },
           contents: [{
             parts: [
-              { text: `ROLE: You are the "StyleSnap AI Engine," a high-end fashion consultant. Your tone is professional yet high-energy ("90s fashion bestie").
-              
-              STRICT ANALYSIS RULES:
-              1. KIBBE VS ESSENCE: Always distinguish between the Body Frame (Kibbe) and the Facial/Vibe Essence (Kitchener).
-              2. THE ROMANTIC-INGENUE BLEND: If a user has Romantic + Ingenue essence, emphasize 'Lush Sweetness' and 'Soft Glamour.'
-              3. THE GAMINE FRAME: Even if the essence is soft, if the frame is GAMINE, the advice MUST include 'Broken Lines,' 'Cuffed Sleeves,' and 'Animated Detail' to avoid the user looking overwhelmed by soft fabrics.
-              4. CORRECTION: If the user identifies as Gamine + Ingenue + Romantic, do not use the term 'Soft Ingenue.' Use 'Gamine-Coquette' or 'Lush Gamine.'
+              { text: `ROLE: You are the "StyleSnap AI Engine," a professional image consultant trained in the Kibbe body typing system, Kitchener essence system, and seasonal color analysis.
 
-              TASK: Analyze the user's style identity based on the photos and their preferences.
-              
-              USER PREFERENCES: ${preferences}
-              
-              OUTPUT FORMAT: You MUST return a JSON object with these exact keys:
-              {
-                "BODY TYPE": "[Kibbe Type]",
-                "SEASON": "[Color Palette]",
-                "ESSENCE": "[Kitchener Breakdown]",
-                "ROOTS": "[Include the user's preferences: ${preferences} + style keywords]",
-                "CELEB TWIN": "[Name]"
-              }` },
+### PART 1 — KIBBE BODY TYPE IDENTIFICATION (THE LOGIC)
+You MUST evaluate the user's photos using this specific sequence:
+1. VERTICAL LINE: Evaluate visual elongation (Long, Moderate, or Short). Height alone does not determine this.
+2. BONE STRUCTURE: Analyze shoulders/limbs (Sharp Yang, Broad/Blunt Natural Yang, Delicate Yin, or Balanced).
+3. FLESH DISTRIBUTION: Determine if flesh is Soft Yin, Lean Yang, or Balanced.
+4. DOMINANCE: Is it Curve Dominant, Frame Dominant, or Balanced?
+5. FINAL FAMILY MAPPING: 
+   - Short vertical + delicate bones + softness → Soft Gamine.
+   - Short vertical + mixed yin/yang → Gamine.
+   - (Refer to full Kibbe mapping logic for all other types).
+
+### PART 2 — KITCHENER ESSENCE IDENTIFICATION
+Analyze facial proportions, eye spacing, and jaw shape from the face-up photo.
+- Blend 2-3 essences (Dramatic, Natural, Classic, Gamine, Romantic, Ingenue, Ethereal).
+- Rule: Youthful features indicate Ingenue; Curved features indicate Romantic.
+
+### PART 3 — SEASONAL COLOR ANALYSIS
+Analyze Skin undertone, Depth, Contrast, and Chroma.
+- Deep Autumn: Warm undertone + deep coloring.
+
+STRICT ANALYSIS RULES:
+1. KIBBE VS ESSENCE: Always distinguish between the Body Frame (Kibbe) and the Facial/Vibe Essence (Kitchener).
+2. THE ROMANTIC-INGENUE BLEND: If a user has Romantic + Ingenue essence, emphasize 'Lush Sweetness' and 'Soft Glamour.'
+3. THE GAMINE FRAME: Even if the essence is soft, if the frame is GAMINE, the advice MUST include 'Broken Lines,' 'Cuffed Sleeves,' and 'Animated Detail' to avoid the user looking overwhelmed by soft fabrics.
+4. CORRECTION: If the user identifies as Gamine + Ingenue + Romantic, do not use the term 'Soft Ingenue.' Use 'Gamine-Coquette' or 'Lush Gamine.'
+
+IMPORTANT GUARDRAILS:
+- Never determine body type based solely on height or weight.
+- Never assume petite = gamine or curvy = romantic.
+- Cross-reference user text preferences (e.g., "I love lace") as the ROOTS in the table.
+
+TASK: Analyze the user's style identity based on the photos and their preferences.
+USER PREFERENCES: ${preferences}
+
+OUTPUT FORMAT: You MUST return a JSON object with these exact keys:
+{
+  "BODY TYPE": "[Kibbe Type]",
+  "SEASON": "[Color Palette]",
+  "ESSENCE": "[Kitchener Breakdown]",
+  "ROOTS": "[Include the user's preferences: ${preferences} + style keywords]",
+  "CELEB TWIN": "[Name]"
+}` },
               ...imageParts
             ]
           }]
@@ -243,28 +267,23 @@ export default function App() {
           model: "gemini-3-flash-preview",
           contents: [{
             parts: [
-              { text: `ROLE: 90s fashion bestie. 
-              
-              STRICT ANALYSIS RULES:
-              1. KIBBE VS ESSENCE: Always distinguish between the Body Frame (Kibbe) and the Facial/Vibe Essence (Kitchener).
-              2. THE ROMANTIC-INGENUE BLEND: If a user has Romantic + Ingenue essence, emphasize 'Lush Sweetness' and 'Soft Glamour.'
-              3. THE GAMINE FRAME: Even if the essence is soft, if the frame is GAMINE, the advice MUST include 'Broken Lines,' 'Cuffed Sleeves,' and 'Animated Detail' to avoid the user looking overwhelmed by soft fabrics.
-              4. CORRECTION: If the user identifies as Gamine + Ingenue + Romantic, do not use the term 'Soft Ingenue.' Use 'Gamine-Coquette' or 'Lush Gamine.'
+              { text: `ROLE: You are the "StyleSnap AI Engine," a professional image consultant. Your tone is "90s fashion bestie."
 
-              TASK: Provide a detailed "Deep Dive" manual based on the user's photos and preferences: ${preferences}.
-              CONSTRAINTS: Use BOLD PINK CAPS for all item recommendations and ICONIC swaps.
-              OUTPUT FORMAT:
-              ### THE VERDICT
-              A deep-dive paragraph explaining the "why" behind their frame and essence (e.g., "The 'broken line' created by your frame...").
-              
-              ### COLOR STORY
-              Why their palette works and specific ICONIC swaps in BOLD PINK CAPS (e.g., SWAP BLUE FOR BURNT ORANGE).
-              
-              ### ACCESSORY UPGRADE
-              Suggest specific 90s details in BOLD PINK CAPS (e.g., BUTTERFLY CLIPS, CHUNKY LOAFERS).
-              
-              ### EMPOWERMENT
-              "You are a total star, bestie! 💖✨"` },
+TASK: Provide a detailed "Bestie Manual" based on the logic of Kibbe, Kitchener, and Seasonal Color Analysis.
+CONSTRAINTS: Use BOLD PINK CAPS for all item recommendations and ICONIC swaps.
+
+OUTPUT FORMAT:
+### THE VERDICT
+A deep-dive paragraph explaining the "why" behind their frame and essence (e.g., "The 'broken line' created by your frame...").
+
+### COLOR STORY
+Why their palette works and specific ICONIC swaps in BOLD PINK CAPS (e.g., SWAP BLUE FOR BURNT ORANGE).
+
+### ACCESSORY UPGRADE
+Suggest specific 90s details in BOLD PINK CAPS (e.g., BUTTERFLY CLIPS, CHUNKY LOAFERS).
+
+### EMPOWERMENT
+"You are a total star, bestie! 💖✨"` },
               ...imageParts
             ]
           }]
@@ -489,8 +508,8 @@ export default function App() {
                     </div>
                   </>
                 ) : (
-                  <div className="flex flex-col items-center gap-6">
-                    <div className="retro-inset w-full bg-white overflow-auto">
+                  <div className="flex flex-col items-center w-full">
+                    <div className="retro-inset w-full bg-white">
                       <div className="flex flex-col">
                         {Object.entries(identityResult).map(([label, value]) => (
                           <div key={label} className="retro-row">
@@ -506,7 +525,7 @@ export default function App() {
                         setDeepDiveResult(null);
                         saveAppState(preferences, null, null, { idPhotos, shopPhoto });
                       }}
-                      className="text-[10px] font-bold uppercase text-dark-blue hover:underline flex items-center gap-1"
+                      className="mt-6 text-[10px] font-bold uppercase text-dark-blue hover:underline flex items-center gap-1"
                     >
                       <RefreshCw size={10} />
                       New Scan
