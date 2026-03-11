@@ -1,0 +1,96 @@
+@import "tailwindcss";
+
+@theme {
+  --color-pastel-pink: #f8c8dc;
+  --color-retro-grey: #cccccc;
+  --color-barbie-pink: #d6619e;
+  --color-dark-blue: #000080;
+  --color-retro-yellow: #ffffa0;
+  
+  --font-sans: "Courier New", Courier, monospace;
+}
+
+@layer base {
+  body {
+    @apply bg-pastel-pink text-black font-sans min-h-screen;
+    background-image: 
+      linear-gradient(var(--color-retro-yellow) 1px, transparent 1px),
+      linear-gradient(90deg, var(--color-retro-yellow) 1px, transparent 1px);
+    background-size: 40px 40px;
+  }
+}
+
+.retro-window {
+  @apply bg-retro-grey border-t-2 border-l-2 border-white border-b-2 border-r-2 border-gray-600 shadow-[2px_2px_0px_0px_rgba(0,0,0,1)];
+}
+
+.retro-title-bar {
+  @apply bg-dark-blue text-white px-2 py-1 flex items-center justify-between font-bold text-sm;
+}
+
+.retro-button {
+  @apply bg-barbie-pink text-white px-4 py-2 font-bold border-t-2 border-l-2 border-pink-300 border-b-2 border-r-2 border-pink-900 shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none transition-all disabled:opacity-50 disabled:cursor-not-allowed;
+}
+
+.retro-tab {
+  @apply px-4 py-1 bg-retro-grey border-t-2 border-l-2 border-white border-r-2 border-gray-600 rounded-t-lg text-xs font-bold cursor-pointer transition-colors;
+}
+
+.retro-tab-active {
+  @apply bg-retro-grey border-b-0 -mb-[2px] z-10;
+}
+
+.retro-inset {
+  @apply bg-white border-t-2 border-l-2 border-gray-600 border-b-2 border-r-2 border-white p-4;
+}
+
+.bold-pink-caps {
+  @apply text-barbie-pink font-black uppercase;
+}
+
+/* Row-based table styling for retro look */
+.retro-row {
+  display: flex !important;
+  justify-content: space-between !important;
+  align-items: center !important;
+  padding: 10px 5px !important;
+  border-bottom: 1px solid #808080 !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+}
+
+.retro-row-label {
+  @apply font-bold uppercase text-xs text-dark-blue text-left;
+  white-space: nowrap !important;
+  flex-shrink: 0 !important;
+  margin-right: 16px !important;
+}
+
+.retro-row-value {
+  @apply text-right font-medium text-sm;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  flex-grow: 1 !important;
+}
+
+.deep-dive-content {
+  line-height: 1.8;
+}
+.deep-dive-content h3 {
+  @apply font-bold text-barbie-pink uppercase mb-4 mt-8;
+  color: #d6619e !important;
+}
+.deep-dive-content p {
+  margin-bottom: 25px !important;
+}
+
+.ad-slot {
+  @apply w-full h-[100px] mt-8 bg-white flex items-center justify-center relative overflow-hidden;
+}
+
+.ad-label {
+  @apply absolute top-0 left-0 bg-dark-blue text-white text-[8px] px-1 font-bold uppercase;
+}
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap');

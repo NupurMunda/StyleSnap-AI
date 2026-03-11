@@ -1,0 +1,7 @@
+{
+  "name": "StyleSnap AI",
+  "description": "Your Y2K Coquette digital boutique! A high-energy AI stylist that analyzes your Kibbe Type, Kitchener Essences, and Seasonal Color Palette with a best-friend vibe. ✨💖",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
