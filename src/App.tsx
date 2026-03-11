@@ -51,6 +51,30 @@ export default function App() {
   const [showOverload, setShowOverload] = useState(false);
   const [showQuotaError, setShowQuotaError] = useState(false);
 
+  const compressImage = (base64: string): Promise<string> => {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let width = img.width;
+        let height = img.height;
+        const maxWidth = 800;
+        
+        if (width > maxWidth) {
+          height = (height * maxWidth) / width;
+          width = maxWidth;
+        }
+        
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx?.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL('image/jpeg', 0.7));
+      };
+      img.src = base64;
+    });
+  };
+
   // Photos
   const [idPhotos, setIdPhotos] = useState<(string | null)[]>([null, null]);
   const [shopPhoto, setShopPhoto] = useState<string | null>(null);
@@ -79,15 +103,26 @@ export default function App() {
 
   // Save state to localStorage
   const saveAppState = (prefs: string, idRes: any, ddRes: any, photos: any) => {
-    try {
+    const attemptSave = () => {
       localStorage.setItem('userPrefs', prefs);
       if (idRes || ddRes) {
         localStorage.setItem('analysisResult', JSON.stringify({ identityResult: idRes, deepDiveResult: ddRes }));
       }
       localStorage.setItem('stylesnap_photos', JSON.stringify(photos));
+    };
+
+    try {
+      attemptSave();
     } catch (e) {
       if (e instanceof DOMException && (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED')) {
-        setShowQuotaError(true);
+        // Automatically clear old data to make room for the new scan
+        localStorage.removeItem('stylesnap_photos');
+        localStorage.removeItem('analysisResult');
+        try {
+          attemptSave();
+        } catch (retryError) {
+          setShowQuotaError(true);
+        }
       }
     }
   };
@@ -126,16 +161,18 @@ export default function App() {
     const file = e.target.files?.[0];
     if (file && uploadTarget) {
       const reader = new FileReader();
-      reader.onloadend = () => {
-        const base64 = reader.result as string;
+      reader.onloadend = async () => {
+        const rawBase64 = reader.result as string;
+        const compressedBase64 = await compressImage(rawBase64);
+        
         if (uploadTarget.type === 'ID' && uploadTarget.index !== undefined) {
           const newPhotos = [...idPhotos];
-          newPhotos[uploadTarget.index] = base64;
+          newPhotos[uploadTarget.index] = compressedBase64;
           setIdPhotos(newPhotos);
           saveAppState(preferences, identityResult, deepDiveResult, { idPhotos: newPhotos, shopPhoto });
         } else if (uploadTarget.type === 'SHOP') {
-          setShopPhoto(base64);
-          saveAppState(preferences, identityResult, deepDiveResult, { idPhotos, shopPhoto: base64 });
+          setShopPhoto(compressedBase64);
+          saveAppState(preferences, identityResult, deepDiveResult, { idPhotos, shopPhoto: compressedBase64 });
         }
         setUploadTarget(null);
       };
