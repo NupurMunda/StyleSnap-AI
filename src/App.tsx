@@ -28,7 +28,7 @@ import remarkGfm from 'remark-gfm';
 // Initialize Gemini
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY as string });
 
-type Tab = 'ANALYSE' | 'SHOP' | 'DEEP_DIVE';
+type Tab = 'ANALYSE' | 'RATE' | 'DEEP_DIVE';
 
 interface RateLimit {
   count: number;
@@ -46,7 +46,7 @@ export default function App() {
   
   // Results
   const [identityResult, setIdentityResult] = useState<{ [key: string]: string } | null>(null);
-  const [shopResult, setShopResult] = useState<string | null>(null);
+  const [rateResult, setRateResult] = useState<string | null>(null);
   const [deepDiveResult, setDeepDiveResult] = useState<string | null>(null);
   const [showOverload, setShowOverload] = useState(false);
   const [showQuotaError, setShowQuotaError] = useState(false);
@@ -77,10 +77,10 @@ export default function App() {
 
   // Photos
   const [idPhotos, setIdPhotos] = useState<(string | null)[]>([null, null]);
-  const [shopPhoto, setShopPhoto] = useState<string | null>(null);
+  const [lookPhoto, setLookPhoto] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [uploadTarget, setUploadTarget] = useState<{ type: 'ID' | 'SHOP', index?: number } | null>(null);
+  const [uploadTarget, setUploadTarget] = useState<{ type: 'ID' | 'LOOK', index?: number } | null>(null);
 
   // Load state from localStorage
   useEffect(() => {
@@ -97,7 +97,7 @@ export default function App() {
     if (savedPhotos) {
       const parsed = JSON.parse(savedPhotos);
       if (parsed.idPhotos) setIdPhotos(parsed.idPhotos);
-      if (parsed.shopPhoto) setShopPhoto(parsed.shopPhoto);
+      if (parsed.lookPhoto) setLookPhoto(parsed.lookPhoto);
     }
   }, []);
 
@@ -135,7 +135,8 @@ export default function App() {
     setIdentityResult(null);
     setDeepDiveResult(null);
     setIdPhotos([null, null]);
-    setShopPhoto(null);
+    setLookPhoto(null);
+    setRateResult(null);
     setShowQuotaError(false);
   };
 
@@ -169,10 +170,11 @@ export default function App() {
           const newPhotos = [...idPhotos];
           newPhotos[uploadTarget.index] = compressedBase64;
           setIdPhotos(newPhotos);
-          saveAppState(preferences, identityResult, deepDiveResult, { idPhotos: newPhotos, shopPhoto });
-        } else if (uploadTarget.type === 'SHOP') {
-          setShopPhoto(compressedBase64);
-          saveAppState(preferences, identityResult, deepDiveResult, { idPhotos, shopPhoto: compressedBase64 });
+          saveAppState(preferences, identityResult, deepDiveResult, { idPhotos: newPhotos, lookPhoto });
+        } else if (uploadTarget.type === 'LOOK') {
+          setLookPhoto(compressedBase64);
+          setRateResult(null); // Clear old result for fresh analysis
+          saveAppState(preferences, identityResult, deepDiveResult, { idPhotos, lookPhoto: compressedBase64 });
         }
         setUploadTarget(null);
       };
@@ -180,7 +182,7 @@ export default function App() {
     }
   };
 
-  const triggerUpload = (type: 'ID' | 'SHOP', index?: number) => {
+  const triggerUpload = (type: 'ID' | 'LOOK', index?: number) => {
     setUploadTarget({ type, index });
     fileInputRef.current?.click();
   };
@@ -295,7 +297,7 @@ Suggest specific 90s details in BOLD PINK CAPS (e.g., BUTTERFLY CLIPS, CHUNKY LO
       
       setIdentityResult(tableJson);
       setDeepDiveResult(manualText);
-      saveAppState(preferences, tableJson, manualText, { idPhotos, shopPhoto });
+      saveAppState(preferences, tableJson, manualText, { idPhotos, lookPhoto });
       incrementLimit();
     } catch (err: any) {
       setError("Ugh, system crash! " + err.message);
@@ -304,9 +306,9 @@ Suggest specific 90s details in BOLD PINK CAPS (e.g., BUTTERFLY CLIPS, CHUNKY LO
     }
   };
 
-  const runShopSure = async () => {
-    if (!shopPhoto) {
-      setError("Babe, show me the goods! Upload a photo of the item! 👗✨");
+  const runRateMyLook = async () => {
+    if (!lookPhoto) {
+      setError("Babe, show me the look! Upload a photo of your outfit! 👗✨");
       return;
     }
 
@@ -320,8 +322,8 @@ Suggest specific 90s details in BOLD PINK CAPS (e.g., BUTTERFLY CLIPS, CHUNKY LO
     try {
       const imagePart = {
         inlineData: {
-          data: shopPhoto.split(',')[1],
-          mimeType: shopPhoto.split(';')[0].split(':')[1]
+          data: lookPhoto.split(',')[1],
+          mimeType: lookPhoto.split(';')[0].split(':')[1]
         }
       };
 
@@ -329,19 +331,23 @@ Suggest specific 90s details in BOLD PINK CAPS (e.g., BUTTERFLY CLIPS, CHUNKY LO
         model: "gemini-3-flash-preview",
         contents: [{
           parts: [
-            { text: `ROLE: 90s fashion bestie. 
+            { text: `ROLE: You are the "StyleSnap AI Engine," a professional 90s fashion bestie and outfit coach.
             CONTEXT: The user's identity is: ${JSON.stringify(identityResult)}. 
-            TASK: Evaluate this new clothing item for them. 
+            TASK: Grade this outfit and provide "Level Up" coaching.
+            
             OUTPUT FORMAT:
             - MATCH SCORE: [X/10] 🌟
-            - VERDICT: 1-sentence decision (e.g., "Totally You!").
-            - THE HACK: 1-sentence style tip.` },
+            - THE VIBE: 1-sentence description (e.g., "90s K-Drama Lead meets Harajuku Sweetheart!")
+            - BESTIE ENHANCEMENTS (The "Level Up"):
+              * [Focus on Balance]: e.g., "Since you're a Soft Classic/Romantic blend, add a dainty gold chain to pull the symmetry together."
+              * [Focus on Color]: e.g., "Swap that cool-toned scarf for a Deep Autumn Terracotta to make your skin glow."
+              * [Focus on Detail]: e.g., "Add a lace-trimmed sock to honor your Ingenue side."` },
             imagePart
           ]
         }]
       });
 
-      setShopResult(response.text || "System error! 💖");
+      setRateResult(response.text || "System error! 💖");
     } catch (err: any) {
       setError("System glitch! " + err.message);
     } finally {
@@ -421,10 +427,10 @@ Suggest specific 90s details in BOLD PINK CAPS (e.g., BUTTERFLY CLIPS, CHUNKY LO
             [ANALYSE_ME.EXE]
           </button>
           <button 
-            onClick={() => setActiveTab('SHOP')}
-            className={`retro-tab ${activeTab === 'SHOP' ? 'retro-tab-active' : ''}`}
+            onClick={() => setActiveTab('RATE')}
+            className={`retro-tab ${activeTab === 'RATE' ? 'retro-tab-active' : ''}`}
           >
-            [SHOP_SURE.EXE]
+            [RATE_MY_LOOK.EXE]
           </button>
           <button 
             onClick={() => setActiveTab('DEEP_DIVE')}
@@ -463,7 +469,7 @@ Suggest specific 90s details in BOLD PINK CAPS (e.g., BUTTERFLY CLIPS, CHUNKY LO
                                   const next = [...idPhotos];
                                   next[i] = null;
                                   setIdPhotos(next);
-                                  saveAppState(preferences, identityResult, deepDiveResult, { idPhotos: next, shopPhoto });
+                                  saveAppState(preferences, identityResult, deepDiveResult, { idPhotos: next, lookPhoto });
                                 }}
                                 className="absolute top-2 right-2 p-1 bg-white/80 text-red-500 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
                               >
@@ -489,7 +495,7 @@ Suggest specific 90s details in BOLD PINK CAPS (e.g., BUTTERFLY CLIPS, CHUNKY LO
                         value={preferences}
                         onChange={(e) => {
                           setPreferences(e.target.value);
-                          saveAppState(e.target.value, identityResult, deepDiveResult, { idPhotos, shopPhoto });
+                          saveAppState(e.target.value, identityResult, deepDiveResult, { idPhotos, lookPhoto });
                         }}
                         placeholder="Tell me your vibe, babe! ✨"
                         className="w-full retro-inset h-20 text-sm focus:outline-none resize-none"
@@ -523,7 +529,7 @@ Suggest specific 90s details in BOLD PINK CAPS (e.g., BUTTERFLY CLIPS, CHUNKY LO
                       onClick={() => {
                         setIdentityResult(null);
                         setDeepDiveResult(null);
-                        saveAppState(preferences, null, null, { idPhotos, shopPhoto });
+                        saveAppState(preferences, null, null, { idPhotos, lookPhoto });
                       }}
                       className="mt-6 text-[10px] font-bold uppercase text-dark-blue hover:underline flex items-center gap-1"
                     >
@@ -535,17 +541,17 @@ Suggest specific 90s details in BOLD PINK CAPS (e.g., BUTTERFLY CLIPS, CHUNKY LO
               </motion.div>
             )}
 
-            {activeTab === 'SHOP' && (
+            {activeTab === 'RATE' && (
               <motion.div 
-                key="shop"
+                key="rate"
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
                 className="space-y-6"
               >
                 <div className="text-center mb-4">
-                  <h2 className="text-xl font-bold text-dark-blue italic">👗 SHOP_SURE.EXE 👗</h2>
-                  <p className="text-xs text-gray-600">Check a new item against your lines! 🌟</p>
+                  <h2 className="text-xl font-bold text-dark-blue italic">👗 RATE_MY_LOOK.EXE 👗</h2>
+                  <p className="text-xs text-gray-600">High-energy outfit grading and coaching! 🌟</p>
                 </div>
 
                 {!identityResult ? (
@@ -555,45 +561,69 @@ Suggest specific 90s details in BOLD PINK CAPS (e.g., BUTTERFLY CLIPS, CHUNKY LO
                   </div>
                 ) : (
                   <div className="flex flex-col items-center gap-6">
-                    <div className="retro-inset w-full max-w-sm aspect-[4/3] flex flex-col items-center justify-center relative overflow-hidden group">
-                      {shopPhoto ? (
-                        <>
-                          <img src={shopPhoto} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                          <button 
-                            onClick={() => setShopPhoto(null)}
-                            className="absolute top-2 right-2 p-1 bg-white/80 text-red-500 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
-                          >
-                            <Trash2 size={16} />
-                          </button>
-                        </>
-                      ) : (
-                        <button 
-                          onClick={() => triggerUpload('SHOP')}
-                          className="flex flex-col items-center gap-2 text-gray-400 hover:text-barbie-pink transition-colors"
-                        >
-                          <ShoppingBag size={48} />
-                          <span className="text-[10px] font-bold uppercase">Upload Item Photo</span>
-                        </button>
-                      )}
-                    </div>
-
-                    <button 
-                      onClick={runShopSure}
-                      disabled={analyzing}
-                      className="retro-button w-full max-w-xs flex items-center justify-center gap-2"
-                    >
-                      {analyzing ? <RefreshCw className="animate-spin" /> : <Search size={18} />}
-                      IS THIS ME?
-                    </button>
-
-                    {shopResult && (
-                      <div className="retro-inset w-full bg-white">
-                        <div className="prose prose-sm prose-pink max-w-none">
-                          <ReactMarkdown>
-                            {shopResult}
-                          </ReactMarkdown>
+                    {!rateResult ? (
+                      /* State 1: Empty/Input */
+                      <>
+                        <div className="retro-inset w-full max-w-sm aspect-[4/3] flex flex-col items-center justify-center relative overflow-hidden group">
+                          {lookPhoto ? (
+                            <>
+                              <img src={lookPhoto} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                              <button 
+                                onClick={() => {
+                                  setLookPhoto(null);
+                                  setRateResult(null);
+                                }}
+                                className="absolute top-2 right-2 p-1 bg-white/80 text-red-500 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                              >
+                                <Trash2 size={16} />
+                              </button>
+                            </>
+                          ) : (
+                            <button 
+                              onClick={() => triggerUpload('LOOK')}
+                              className="flex flex-col items-center gap-2 text-gray-400 hover:text-barbie-pink transition-colors"
+                            >
+                              <Zap size={48} />
+                              <span className="text-[10px] font-bold uppercase">Upload Outfit Photo</span>
+                            </button>
+                          )}
                         </div>
-                      </div>
+
+                        <button 
+                          onClick={runRateMyLook}
+                          disabled={analyzing || !lookPhoto}
+                          className="retro-button w-full max-w-xs flex items-center justify-center gap-2"
+                        >
+                          {analyzing ? <RefreshCw className="animate-spin" /> : <Search size={18} />}
+                          SCAN MY LOOK!
+                        </button>
+                      </>
+                    ) : (
+                      /* State 2: Result */
+                      <>
+                        <div className="retro-inset w-full max-w-sm aspect-[4/3] overflow-hidden">
+                          <img src={lookPhoto!} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                        </div>
+
+                        <div className="retro-inset w-full bg-white">
+                          <div className="prose prose-sm prose-pink max-w-none">
+                            <ReactMarkdown>
+                              {rateResult}
+                            </ReactMarkdown>
+                          </div>
+                        </div>
+
+                        <button 
+                          onClick={() => {
+                            setLookPhoto(null);
+                            setRateResult(null);
+                          }}
+                          className="retro-button w-full max-w-xs flex items-center justify-center gap-2"
+                        >
+                          <RefreshCw size={18} />
+                          TRY ANOTHER LOOK!
+                        </button>
+                      </>
                     )}
                   </div>
                 )}
