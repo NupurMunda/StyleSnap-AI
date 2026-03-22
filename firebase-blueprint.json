@@ -1,0 +1,42 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "Stores user style identity and preferences",
+      "type": "object",
+      "properties": {
+        "identityResult": { "type": "object" },
+        "deepDiveResult": { "type": "string" },
+        "preferences": { "type": "string" },
+        "idPhotos": { "type": "array", "items": { "type": "string" } },
+        "lookPhoto": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "WishlistItem": {
+      "title": "Wishlist Item",
+      "description": "A product saved by the user",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "price": { "type": "string" },
+        "image_url": { "type": "string" },
+        "affiliate_link": { "type": "string" },
+        "kibbe_type": { "type": "string" },
+        "kitchener_essence": { "type": "string" },
+        "platform": { "type": "string" },
+        "category": { "type": "string" }
+      }
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User's style profile"
+    },
+    "/users/{userId}/wishlist/{productId}": {
+      "schema": "WishlistItem",
+      "description": "User's saved products"
+    }
+  }
+}

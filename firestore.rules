@@ -1,0 +1,42 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    function isValidUser(data) {
+      return data.keys().hasOnly(['identityResult', 'deepDiveResult', 'preferences', 'idPhotos', 'lookPhoto', 'updatedAt']);
+    }
+    
+    function isValidWishlistItem(data) {
+      return data.keys().hasOnly(['id', 'name', 'price', 'image_url', 'affiliate_link', 'kibbe_type', 'kitchener_essence', 'platform', 'category']) &&
+             (!('name' in data) || data.name is string) &&
+             (!('price' in data) || data.price is string) &&
+             (!('image_url' in data) || data.image_url is string);
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+    
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      allow create, update: if isOwner(userId) && isValidUser(request.resource.data);
+      
+      match /wishlist/{productId} {
+        allow read: if isOwner(userId);
+        allow create, update: if isOwner(userId) && isValidWishlistItem(request.resource.data);
+        allow delete: if isOwner(userId);
+      }
+    }
+  }
+}

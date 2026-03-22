@@ -19,16 +19,60 @@ import {
   Square,
   FileText,
   Search,
-  AlertTriangle
+  AlertTriangle,
+  LogIn,
+  LogOut,
+  ChevronLeft,
+  ChevronRight,
+  ExternalLink,
+  Menu,
+  ChevronDown
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { 
+  auth, 
+  loginWithGoogle, 
+  logout, 
+  db, 
+  rtdb 
+} from './firebase';
+import { onAuthStateChanged, User } from 'firebase/auth';
+import { 
+  ref, 
+  onValue, 
+  get, 
+  child 
+} from 'firebase/database';
+import { 
+  doc, 
+  setDoc, 
+  getDoc, 
+  getDocFromServer,
+  collection, 
+  onSnapshot,
+  query,
+  where,
+  deleteDoc
+} from 'firebase/firestore';
 
 // Initialize Gemini
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY as string });
 
-type Tab = 'ANALYSE' | 'RATE' | 'DEEP_DIVE';
+type Tab = 'ANALYSE' | 'RATE' | 'DEEP_DIVE' | 'SHOP' | 'WISHLIST';
+
+interface Product {
+  id: string;
+  name: string;
+  price: string;
+  image_url: string;
+  affiliate_link: string;
+  kibbe_type: string;
+  kitchener_essence: string;
+  platform?: string;
+  category?: string;
+}
 
 interface RateLimit {
   count: number;
@@ -38,11 +82,76 @@ interface RateLimit {
 const SCAN_LIMIT = 3;
 const RESET_TIME = 24 * 60 * 60 * 1000; // 24 hours
 
+enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId: string | undefined;
+    email: string | null | undefined;
+    emailVerified: boolean | undefined;
+    isAnonymous: boolean | undefined;
+    tenantId: string | null | undefined;
+    providerInfo: {
+      providerId: string;
+      displayName: string | null;
+      email: string | null;
+      photoUrl: string | null;
+    }[];
+  }
+}
+
+function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email,
+      emailVerified: auth.currentUser?.emailVerified,
+      isAnonymous: auth.currentUser?.isAnonymous,
+      tenantId: auth.currentUser?.tenantId,
+      providerInfo: auth.currentUser?.providerData.map(provider => ({
+        providerId: provider.providerId,
+        displayName: provider.displayName,
+        email: provider.email,
+        photoUrl: provider.photoURL
+      })) || []
+    },
+    operationType,
+    path
+  }
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
+}
+
+const inferCategory = (name: string | undefined | null) => {
+  if (!name) return 'UNCATEGORIZED';
+  const n = name.toLowerCase();
+  if (n.includes('dress')) return 'DRESSES';
+  if (n.includes('top') || n.includes('shirt') || n.includes('blouse') || n.includes('tee') || n.includes('tank')) return 'TOPS';
+  if (n.includes('pant') || n.includes('jean') || n.includes('trouser') || n.includes('skirt') || n.includes('short') || n.includes('bottom')) return 'BOTTOMS';
+  if (n.includes('set') || n.includes('coord') || n.includes('suit')) return 'SETS';
+  if (n.includes('accessory') || n.includes('bag') || n.includes('jewelry') || n.includes('belt') || n.includes('earring') || n.includes('necklace')) return 'ACCESSORIES';
+  return 'UNCATEGORIZED';
+};
+
 export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>('ANALYSE');
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [preferences, setPreferences] = useState('');
+  const [user, setUser] = useState<User | null>(null);
+  const [isAuthReady, setIsAuthReady] = useState(false);
   
   // Results
   const [identityResult, setIdentityResult] = useState<{ [key: string]: string } | null>(null);
@@ -50,6 +159,186 @@ export default function App() {
   const [deepDiveResult, setDeepDiveResult] = useState<string | null>(null);
   const [showOverload, setShowOverload] = useState(false);
   const [showQuotaError, setShowQuotaError] = useState(false);
+
+  // Photos
+  const [idPhotos, setIdPhotos] = useState<(string | null)[]>([null, null]);
+  const [lookPhoto, setLookPhoto] = useState<string | null>(null);
+
+  // Shop & Wishlist
+  const [products, setProducts] = useState<Product[]>([]);
+  const [currentProductIndex, setCurrentProductIndex] = useState(0);
+  const [wishlist, setWishlist] = useState<Product[]>([]);
+  const [loadingProducts, setLoadingProducts] = useState(false);
+
+  // Auth Listener
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+      setIsAuthReady(true);
+      if (currentUser) {
+        // Load user data from Firestore
+        const userDocRef = doc(db, 'users', currentUser.uid);
+        onSnapshot(userDocRef, (docSnap) => {
+          if (docSnap.exists()) {
+            const data = docSnap.data();
+            if (data.identityResult) setIdentityResult(data.identityResult);
+            if (data.deepDiveResult) setDeepDiveResult(data.deepDiveResult);
+            if (data.preferences) setPreferences(data.preferences);
+            if (data.idPhotos) setIdPhotos(data.idPhotos);
+            if (data.lookPhoto) setLookPhoto(data.lookPhoto);
+          }
+        });
+
+        // Load wishlist from Firestore
+        const wishlistRef = collection(db, 'users', currentUser.uid, 'wishlist');
+        onSnapshot(wishlistRef, (querySnapshot) => {
+          const items: Product[] = [];
+          querySnapshot.forEach((doc) => {
+            const data = doc.data();
+            // Only show items that have an affiliate link
+            if (data.affiliate_link) {
+              items.push({ 
+                id: doc.id, 
+                ...data,
+                name: data.name || 'Newme Style Item',
+                affiliate_link: data.affiliate_link
+              } as Product);
+            }
+          });
+          setWishlist(items);
+        }, (error) => {
+          handleFirestoreError(error, OperationType.LIST, 'users/' + currentUser.uid + '/wishlist');
+        });
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Fetch Products when identity is available
+  useEffect(() => {
+    if (identityResult && (activeTab === 'SHOP')) {
+      fetchProducts();
+    }
+  }, [identityResult, activeTab]);
+
+  // Remove products from Shop if they are wishlisted in real-time
+  useEffect(() => {
+    if (products.length > 0 && wishlist.length > 0) {
+      const filtered = products.filter(p => !wishlist.some(w => w.id === p.id));
+      if (filtered.length !== products.length) {
+        setProducts(filtered);
+        // Ensure index is still valid
+        if (currentProductIndex >= filtered.length && filtered.length > 0) {
+          setCurrentProductIndex(0);
+        }
+      }
+    }
+  }, [wishlist, products.length, currentProductIndex]);
+
+  const fetchProducts = async () => {
+    setLoadingProducts(true);
+    setError(null);
+    const productsRef = ref(rtdb, 'products/newme');
+    try {
+      const snapshot = await get(productsRef);
+      if (snapshot.exists()) {
+        const allProducts: any[] = [];
+        snapshot.forEach((childSnapshot) => {
+          const val = childSnapshot.val();
+          if (val && typeof val === 'object' && val.affiliate_link) {
+            const productData = {
+              id: childSnapshot.key,
+              ...val,
+              name: val.name || 'Newme Style Item',
+              affiliate_link: val.affiliate_link
+            };
+            allProducts.push(productData);
+          }
+        });
+
+        // Filter by Kibbe and Kitchener, and exclude wishlisted items
+        const filtered = allProducts.filter(p => {
+          const userKibbe = (identityResult?.['BODY TYPE'] || '').toLowerCase();
+          const userEssence = (identityResult?.['ESSENCE'] || '').toLowerCase();
+          
+          const pKibbe = String(p.kibbe_type || '').toLowerCase();
+          const pEssence = String(p.kitchener_essence || '').toLowerCase();
+
+          // If no type/essence defined on product, don't show it
+          if (!pKibbe && !pEssence) return false;
+
+          // Exclude if already in wishlist
+          const isWishlisted = wishlist.some(w => w.id === p.id);
+          if (isWishlisted) return false;
+
+          return (pKibbe && userKibbe.includes(pKibbe)) || (pEssence && userEssence.includes(pEssence));
+        });
+
+        // Randomize the order
+        const shuffled = [...filtered].sort(() => Math.random() - 0.5);
+
+        setProducts(shuffled);
+        setCurrentProductIndex(0);
+      } else {
+        setProducts([]);
+      }
+    } catch (err: any) {
+      console.error("Style Engine Error (RTDB):", err);
+      setError("Ugh, the Shop Engine is glitching! " + (err.message || "Unknown error"));
+    } finally {
+      setLoadingProducts(false);
+    }
+  };
+
+  const addToWishlist = async (product: Product) => {
+    if (!user) {
+      setError("Babe! You need to login to save items to your wishlist! 💖✨");
+      return;
+    }
+    try {
+      const wishlistDocRef = doc(db, 'users', user.uid, 'wishlist', product.id);
+      // Ensure we have a name and link before saving
+      const name = product.name || 'Newme Style Item';
+      const affiliate_link = product.affiliate_link;
+      
+      if (!affiliate_link) {
+        console.warn('Attempted to add item to wishlist without affiliate_link:', product.id);
+        // We could return here, but since we filter them out in the UI, this shouldn't happen.
+      }
+      
+      const { id, price, image_url, kibbe_type, kitchener_essence, platform, category } = product;
+      const categoryToSave = category || inferCategory(name);
+      const cleanProduct = { id, name, price, image_url, affiliate_link, kibbe_type, kitchener_essence, platform, category: categoryToSave };
+      
+      // Remove undefined fields
+      Object.keys(cleanProduct).forEach(key => {
+        if ((cleanProduct as any)[key] === undefined) {
+          delete (cleanProduct as any)[key];
+        }
+      });
+
+      await setDoc(wishlistDocRef, cleanProduct);
+    } catch (err: any) {
+      handleFirestoreError(err, OperationType.WRITE, 'users/' + user.uid + '/wishlist/' + product.id);
+    }
+  };
+
+  const removeFromWishlist = async (productId: string) => {
+    if (!user) return;
+    try {
+      const wishlistDocRef = doc(db, 'users', user.uid, 'wishlist', productId);
+      await deleteDoc(wishlistDocRef);
+    } catch (err: any) {
+      handleFirestoreError(err, OperationType.DELETE, 'users/' + user.uid + '/wishlist/' + productId);
+    }
+  };
+
+  const handleSwipe = (direction: 'left' | 'right') => {
+    if (direction === 'right') {
+      addToWishlist(products[currentProductIndex]);
+    }
+    setCurrentProductIndex(prev => (prev + 1) % products.length);
+  };
 
   const compressImage = (base64: string): Promise<string> => {
     return new Promise((resolve) => {
@@ -75,15 +364,24 @@ export default function App() {
     });
   };
 
-  // Photos
-  const [idPhotos, setIdPhotos] = useState<(string | null)[]>([null, null]);
-  const [lookPhoto, setLookPhoto] = useState<string | null>(null);
-
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploadTarget, setUploadTarget] = useState<{ type: 'ID' | 'LOOK', index?: number } | null>(null);
 
   // Load state from localStorage
   useEffect(() => {
+    // Test Firestore connection
+    const testConnection = async () => {
+      try {
+        await getDocFromServer(doc(db, 'test', 'connection'));
+        console.log("Firestore connection successful! 💖");
+      } catch (error) {
+        if (error instanceof Error && error.message.includes('the client is offline')) {
+          console.error("Please check your Firebase configuration. The client is offline.");
+        }
+      }
+    };
+    testConnection();
+
     const savedPrefs = localStorage.getItem('userPrefs');
     const savedAnalysis = localStorage.getItem('analysisResult');
     const savedPhotos = localStorage.getItem('stylesnap_photos');
@@ -101,26 +399,34 @@ export default function App() {
     }
   }, []);
 
-  // Save state to localStorage
-  const saveAppState = (prefs: string, idRes: any, ddRes: any, photos: any) => {
-    const attemptSave = () => {
-      localStorage.setItem('userPrefs', prefs);
-      if (idRes || ddRes) {
-        localStorage.setItem('analysisResult', JSON.stringify({ identityResult: idRes, deepDiveResult: ddRes }));
+  // Save state to Firestore or localStorage
+  const saveAppState = async (prefs: string, idRes: any, ddRes: any, photos: any) => {
+    if (user) {
+      try {
+        const userDocRef = doc(db, 'users', user.uid);
+        await setDoc(userDocRef, {
+          identityResult: idRes,
+          deepDiveResult: ddRes,
+          preferences: prefs,
+          idPhotos: photos.idPhotos,
+          lookPhoto: photos.lookPhoto,
+          updatedAt: new Date().toISOString()
+        }, { merge: true });
+      } catch (e) {
+        handleFirestoreError(e, OperationType.WRITE, 'users/' + user.uid);
       }
-      localStorage.setItem('stylesnap_photos', JSON.stringify(photos));
-    };
-
-    try {
-      attemptSave();
-    } catch (e) {
-      if (e instanceof DOMException && (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED')) {
-        // Automatically clear old data to make room for the new scan
-        localStorage.removeItem('stylesnap_photos');
-        localStorage.removeItem('analysisResult');
-        try {
-          attemptSave();
-        } catch (retryError) {
+    } else {
+      // Fallback to localStorage for guests
+      try {
+        localStorage.setItem('userPrefs', prefs);
+        if (idRes || ddRes) {
+          localStorage.setItem('analysisResult', JSON.stringify({ identityResult: idRes, deepDiveResult: ddRes }));
+        }
+        localStorage.setItem('stylesnap_photos', JSON.stringify(photos));
+      } catch (e) {
+        if (e instanceof DOMException && (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED')) {
+          localStorage.removeItem('stylesnap_photos');
+          localStorage.removeItem('analysisResult');
           setShowQuotaError(true);
         }
       }
@@ -163,8 +469,10 @@ export default function App() {
     if (file && uploadTarget) {
       const reader = new FileReader();
       reader.onloadend = async () => {
+        console.log("Image loaded, starting compression...");
         const rawBase64 = reader.result as string;
         const compressedBase64 = await compressImage(rawBase64);
+        console.log("Compression complete.");
         
         if (uploadTarget.type === 'ID' && uploadTarget.index !== undefined) {
           const newPhotos = [...idPhotos];
@@ -202,6 +510,8 @@ export default function App() {
 
     setAnalyzing(true);
     setError(null);
+    console.log("Starting analysis with", photos.length, "photos...");
+
     try {
       const imageParts = photos.map(p => ({
         inlineData: {
@@ -210,62 +520,56 @@ export default function App() {
         }
       }));
 
+      // Use a fresh instance to be safe
+      const genAI = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY as string });
+
+      console.log("Requesting table and manual from Gemini (Flash)...");
+      
       // Simultaneous generation of Table and Manual
+      // Using Flash for speed as requested by user ("it's taking too long")
       const [tableResponse, manualResponse] = await Promise.all([
-        ai.models.generateContent({
+        genAI.models.generateContent({
           model: "gemini-3-flash-preview",
-          config: { responseMimeType: "application/json" },
+          config: { 
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: "OBJECT",
+              properties: {
+                "BODY TYPE": { type: "STRING" },
+                "SEASON": { type: "STRING" },
+                "ESSENCE": { type: "STRING" },
+                "ROOTS": { type: "STRING" },
+                "CELEB TWIN": { type: "STRING" }
+              },
+              required: ["BODY TYPE", "SEASON", "ESSENCE", "ROOTS", "CELEB TWIN"]
+            }
+          },
           contents: [{
             parts: [
               { text: `ROLE: You are the "StyleSnap AI Engine," a professional image consultant trained in the Kibbe body typing system, Kitchener essence system, and seasonal color analysis.
 
 ### PART 1 — KIBBE BODY TYPE IDENTIFICATION (THE LOGIC)
-You MUST evaluate the user's photos using this specific sequence:
-1. VERTICAL LINE: Evaluate visual elongation (Long, Moderate, or Short). Height alone does not determine this.
-2. BONE STRUCTURE: Analyze shoulders/limbs (Sharp Yang, Broad/Blunt Natural Yang, Delicate Yin, or Balanced).
-3. FLESH DISTRIBUTION: Determine if flesh is Soft Yin, Lean Yang, or Balanced.
-4. DOMINANCE: Is it Curve Dominant, Frame Dominant, or Balanced?
-5. FINAL FAMILY MAPPING: 
-   - Short vertical + delicate bones + softness → Soft Gamine.
-   - Short vertical + mixed yin/yang → Gamine.
-   - (Refer to full Kibbe mapping logic for all other types).
+Evaluate the user's photos:
+1. VERTICAL LINE: visual elongation.
+2. BONE STRUCTURE: shoulders/limbs.
+3. FLESH DISTRIBUTION: yin/yang balance.
+4. FINAL FAMILY MAPPING.
 
 ### PART 2 — KITCHENER ESSENCE IDENTIFICATION
-Analyze facial proportions, eye spacing, and jaw shape from the face-up photo.
-- Blend 2-3 essences (Dramatic, Natural, Classic, Gamine, Romantic, Ingenue, Ethereal).
-- Rule: Youthful features indicate Ingenue; Curved features indicate Romantic.
+Analyze facial proportions from the face-up photo.
 
 ### PART 3 — SEASONAL COLOR ANALYSIS
 Analyze Skin undertone, Depth, Contrast, and Chroma.
-- Deep Autumn: Warm undertone + deep coloring.
-
-STRICT ANALYSIS RULES:
-1. KIBBE VS ESSENCE: Always distinguish between the Body Frame (Kibbe) and the Facial/Vibe Essence (Kitchener).
-2. THE ROMANTIC-INGENUE BLEND: If a user has Romantic + Ingenue essence, emphasize 'Lush Sweetness' and 'Soft Glamour.'
-3. THE GAMINE FRAME: Even if the essence is soft, if the frame is GAMINE, the advice MUST include 'Broken Lines,' 'Cuffed Sleeves,' and 'Animated Detail' to avoid the user looking overwhelmed by soft fabrics.
-4. CORRECTION: If the user identifies as Gamine + Ingenue + Romantic, do not use the term 'Soft Ingenue.' Use 'Gamine-Coquette' or 'Lush Gamine.'
-
-IMPORTANT GUARDRAILS:
-- Never determine body type based solely on height or weight.
-- Never assume petite = gamine or curvy = romantic.
-- Cross-reference user text preferences (e.g., "I love lace") as the ROOTS in the table.
 
 TASK: Analyze the user's style identity based on the photos and their preferences.
 USER PREFERENCES: ${preferences}
 
-OUTPUT FORMAT: You MUST return a JSON object with these exact keys:
-{
-  "BODY TYPE": "[Kibbe Type]",
-  "SEASON": "[Color Palette]",
-  "ESSENCE": "[Kitchener Breakdown]",
-  "ROOTS": "[Include the user's preferences: ${preferences} + style keywords]",
-  "CELEB TWIN": "[Name]"
-}` },
+OUTPUT FORMAT: Return a JSON object with the specified schema.` },
               ...imageParts
             ]
           }]
         }),
-        ai.models.generateContent({
+        genAI.models.generateContent({
           model: "gemini-3-flash-preview",
           contents: [{
             parts: [
@@ -276,13 +580,13 @@ CONSTRAINTS: Use BOLD PINK CAPS for all item recommendations and ICONIC swaps.
 
 OUTPUT FORMAT:
 ### THE VERDICT
-A deep-dive paragraph explaining the "why" behind their frame and essence (e.g., "The 'broken line' created by your frame...").
+A deep-dive paragraph explaining the "why" behind their frame and essence.
 
 ### COLOR STORY
-Why their palette works and specific ICONIC swaps in BOLD PINK CAPS (e.g., SWAP BLUE FOR BURNT ORANGE).
+Why their palette works and specific ICONIC swaps in BOLD PINK CAPS.
 
 ### ACCESSORY UPGRADE
-Suggest specific 90s details in BOLD PINK CAPS (e.g., BUTTERFLY CLIPS, CHUNKY LOAFERS).
+Suggest specific 90s details in BOLD PINK CAPS.
 
 ### EMPOWERMENT
 "You are a total star, bestie! 💖✨"` },
@@ -292,15 +596,23 @@ Suggest specific 90s details in BOLD PINK CAPS (e.g., BUTTERFLY CLIPS, CHUNKY LO
         })
       ]);
 
+      console.log("Gemini responded successfully.");
+
       const tableJson = JSON.parse(tableResponse.text || "{}");
       const manualText = manualResponse.text || "Oops! The manual failed to print! 🎀";
       
       setIdentityResult(tableJson);
       setDeepDiveResult(manualText);
-      saveAppState(preferences, tableJson, manualText, { idPhotos, lookPhoto });
+      
+      // Clear photos after analysis as requested (don't store them)
+      const emptyPhotos = [null, null];
+      setIdPhotos(emptyPhotos);
+      
+      saveAppState(preferences, tableJson, manualText, { idPhotos: emptyPhotos, lookPhoto });
       incrementLimit();
     } catch (err: any) {
-      setError("Ugh, system crash! " + err.message);
+      console.error("Analysis Error Details:", err);
+      setError("Ugh, system crash! " + (err.message || "Unknown error"));
     } finally {
       setAnalyzing(false);
     }
@@ -319,6 +631,8 @@ Suggest specific 90s details in BOLD PINK CAPS (e.g., BUTTERFLY CLIPS, CHUNKY LO
 
     setAnalyzing(true);
     setError(null);
+    console.log("Starting Rate My Look...");
+
     try {
       const imagePart = {
         inlineData: {
@@ -327,7 +641,10 @@ Suggest specific 90s details in BOLD PINK CAPS (e.g., BUTTERFLY CLIPS, CHUNKY LO
         }
       };
 
-      const response = await ai.models.generateContent({
+      const genAI = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY as string });
+      console.log("Requesting rating from Gemini...");
+
+      const response = await genAI.models.generateContent({
         model: "gemini-3-flash-preview",
         contents: [{
           parts: [
@@ -337,19 +654,21 @@ Suggest specific 90s details in BOLD PINK CAPS (e.g., BUTTERFLY CLIPS, CHUNKY LO
             
             OUTPUT FORMAT:
             - MATCH SCORE: [X/10] 🌟
-            - THE VIBE: 1-sentence description (e.g., "90s K-Drama Lead meets Harajuku Sweetheart!")
+            - THE VIBE: 1-sentence description.
             - BESTIE ENHANCEMENTS (The "Level Up"):
-              * [Focus on Balance]: e.g., "Since you're a Soft Classic/Romantic blend, add a dainty gold chain to pull the symmetry together."
-              * [Focus on Color]: e.g., "Swap that cool-toned scarf for a Deep Autumn Terracotta to make your skin glow."
-              * [Focus on Detail]: e.g., "Add a lace-trimmed sock to honor your Ingenue side."` },
+              * [Focus on Balance]
+              * [Focus on Color]
+              * [Focus on Detail]` },
             imagePart
           ]
         }]
       });
 
+      console.log("Gemini responded to rating.");
       setRateResult(response.text || "System error! 💖");
     } catch (err: any) {
-      setError("System glitch! " + err.message);
+      console.error("Rating Error:", err);
+      setError("System glitch! " + (err.message || "Unknown error"));
     } finally {
       setAnalyzing(false);
     }
@@ -363,8 +682,13 @@ Suggest specific 90s details in BOLD PINK CAPS (e.g., BUTTERFLY CLIPS, CHUNKY LO
 
     setAnalyzing(true);
     setError(null);
+    console.log("Starting Deep Dive...");
+
     try {
-      const response = await ai.models.generateContent({
+      const genAI = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY as string });
+      console.log("Requesting deep dive from Gemini...");
+
+      const response = await genAI.models.generateContent({
         model: "gemini-3-flash-preview",
         contents: [{
           parts: [
@@ -375,15 +699,17 @@ Suggest specific 90s details in BOLD PINK CAPS (e.g., BUTTERFLY CLIPS, CHUNKY LO
             OUTPUT FORMAT:
             - THE VERDICT: A deep paragraph explaining the harmony of their lines/essence.
             - COLOUR STORY: Explain why their Season works and suggest iconic color swaps.
-            - STYLE HACK (ICONIC): Specific item upgrades in BOLD PINK CAPS (e.g., CHUNKY LOAFERS).
+            - STYLE HACK (ICONIC): Specific item upgrades in BOLD PINK CAPS.
             - EMPOWERMENT: End with: "You are a total star, bestie! 💖✨"` }
           ]
         }]
       });
 
+      console.log("Gemini responded to deep dive.");
       setDeepDiveResult(response.text || "System error! 💖");
     } catch (err: any) {
-      setError("System glitch! " + err.message);
+      console.error("Deep Dive Error:", err);
+      setError("System glitch! " + (err.message || "Unknown error"));
     } finally {
       setAnalyzing(false);
     }
@@ -391,10 +717,38 @@ Suggest specific 90s details in BOLD PINK CAPS (e.g., BUTTERFLY CLIPS, CHUNKY LO
 
   const limit = getRateLimit();
 
+  const handleLogin = async () => {
+    setError(null);
+    try {
+      await loginWithGoogle();
+    } catch (err: any) {
+      console.error("Login Error:", err);
+      if (err.code === 'auth/popup-closed-by-user') {
+        // User closed the popup, no need to show an error message
+        return;
+      }
+      if (err.code === 'auth/operation-not-allowed') {
+        setError("Babe! You need to enable Google Login in your Firebase Console! 🛑 Go to Auth > Sign-in method and turn on Google! ✨");
+      } else {
+        setError("Login failed! " + (err.message || "Unknown error"));
+      }
+    }
+  };
+
   return (
     <div className="p-4 md:p-8 flex flex-col items-center">
       {/* App Header */}
-      <div className="w-full max-w-4xl mb-8 flex flex-col items-center">
+      <div className="w-full max-w-4xl mb-8 flex flex-col items-center relative">
+        <div className="absolute right-0 top-0">
+          {user && (
+            <div className="flex items-center gap-3">
+              <img src={user.photoURL || ''} className="w-8 h-8 rounded-full border-2 border-barbie-pink" />
+              <button onClick={logout} className="retro-button p-1 px-3 text-[10px] flex items-center gap-1">
+                <LogOut size={12} /> LOGOUT
+              </button>
+            </div>
+          )}
+        </div>
         <h1 className="text-4xl md:text-6xl font-black text-barbie-pink italic tracking-tighter drop-shadow-[2px_2px_0px_rgba(0,0,0,1)] mb-2">
           STYLESNAP AI
         </h1>
@@ -405,26 +759,61 @@ Suggest specific 90s details in BOLD PINK CAPS (e.g., BUTTERFLY CLIPS, CHUNKY LO
 
       {/* Main Window */}
       <div className="w-full max-w-4xl retro-window">
-        {/* Title Bar */}
-        <div className="retro-title-bar">
-          <div className="flex items-center gap-2">
-            <Sparkles size={14} />
-            <span>StyleSnap_Bestie.exe</span>
+        {!isAuthReady ? (
+          <div className="p-20 flex flex-col items-center justify-center gap-4">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-barbie-pink"></div>
+            <p className="text-xs font-bold animate-pulse uppercase tracking-widest">BOOTING STYLE_ENGINE.EXE...</p>
           </div>
-          <div className="flex gap-1">
-            <div className="w-4 h-4 bg-retro-grey border border-gray-600 flex items-center justify-center text-black text-[10px]"><Minus size={10}/></div>
-            <div className="w-4 h-4 bg-retro-grey border border-gray-600 flex items-center justify-center text-black text-[10px]"><Square size={8}/></div>
-            <div className="w-4 h-4 bg-retro-grey border border-gray-600 flex items-center justify-center text-black text-[10px]"><X size={10}/></div>
+        ) : !user ? (
+          <div className="p-12 md:p-20 flex flex-col items-center justify-center text-center gap-8">
+            <div className="w-24 h-24 bg-barbie-pink/10 rounded-full flex items-center justify-center border-2 border-barbie-pink animate-bounce shadow-[0_0_20px_rgba(255,105,180,0.3)]">
+              <Sparkles size={48} className="text-barbie-pink" />
+            </div>
+            <div className="max-w-md">
+              <h2 className="text-3xl font-black text-dark-blue mb-4 tracking-tighter uppercase italic">GET YOUR ULTIMATE GLOW-UP</h2>
+              <p className="text-sm font-medium text-gray-600 leading-relaxed">
+                Level up your fashion sense.<br />
+                Get your free personal style assessment and color analysis in seconds. ✨
+              </p>
+            </div>
+            <button 
+              onClick={handleLogin} 
+              className="retro-button px-10 py-4 text-lg flex items-center gap-3 group hover:scale-105 transition-transform"
+            >
+              <LogIn className="group-hover:rotate-12 transition-transform" />
+              LOGIN WITH GOOGLE
+            </button>
+            <div className="flex flex-col items-center gap-1">
+              <p className="text-[10px] text-gray-400 uppercase tracking-widest font-bold">
+                Secure Auth via Firebase • Style Engine v4.0
+              </p>
+              <p className="text-[8px] text-gray-300 uppercase tracking-widest">
+                All your data is synced across devices ☁️
+              </p>
+            </div>
           </div>
-        </div>
+        ) : (
+          <>
+            {/* Title Bar */}
+            <div className="retro-title-bar">
+              <div className="flex items-center gap-2">
+                <Sparkles size={14} />
+                <span>StyleSnap_Bestie.exe</span>
+              </div>
+              <div className="flex gap-1">
+                <div className="w-4 h-4 bg-retro-grey border border-gray-600 flex items-center justify-center text-black text-[10px]"><Minus size={10}/></div>
+                <div className="w-4 h-4 bg-retro-grey border border-gray-600 flex items-center justify-center text-black text-[10px]"><Square size={8}/></div>
+                <div className="w-4 h-4 bg-retro-grey border border-gray-600 flex items-center justify-center text-black text-[10px]"><X size={10}/></div>
+              </div>
+            </div>
 
-        {/* Tabs */}
-        <div className="flex px-2 pt-2 gap-1 bg-retro-grey border-b-2 border-gray-600">
+        {/* Tabs - Desktop */}
+        <div className="hidden md:flex px-2 pt-2 gap-1 bg-retro-grey border-b-2 border-gray-600">
           <button 
             onClick={() => setActiveTab('ANALYSE')}
             className={`retro-tab ${activeTab === 'ANALYSE' ? 'retro-tab-active' : ''}`}
           >
-            [ANALYSE_ME.EXE]
+            {identityResult ? '[MY_IDENTITY.EXE]' : '[ANALYSE_ME.EXE]'}
           </button>
           <button 
             onClick={() => setActiveTab('RATE')}
@@ -438,6 +827,63 @@ Suggest specific 90s details in BOLD PINK CAPS (e.g., BUTTERFLY CLIPS, CHUNKY LO
           >
             [DEEP_DIVE.DOC]
           </button>
+          <button 
+            onClick={() => setActiveTab('SHOP')}
+            className={`retro-tab ${activeTab === 'SHOP' ? 'retro-tab-active' : ''}`}
+          >
+            [SHOP.EXE]
+          </button>
+          <button 
+            onClick={() => setActiveTab('WISHLIST')}
+            className={`retro-tab ${activeTab === 'WISHLIST' ? 'retro-tab-active' : ''}`}
+          >
+            [WISHLIST.EXE]
+          </button>
+        </div>
+
+        {/* Tabs - Mobile Hamburger */}
+        <div className="md:hidden bg-retro-grey border-b-2 border-gray-600 relative">
+          <button 
+            onClick={() => setIsMenuOpen(!isMenuOpen)}
+            className="w-full p-3 flex items-center justify-between font-bold text-dark-blue"
+          >
+            <div className="flex items-center gap-2">
+              <Menu size={18} />
+              <span>[{activeTab}_MODE]</span>
+            </div>
+            <ChevronDown size={18} className={`transition-transform ${isMenuOpen ? 'rotate-180' : ''}`} />
+          </button>
+          
+          <AnimatePresence>
+            {isMenuOpen && (
+              <motion.div 
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: 'auto', opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                className="overflow-hidden border-t border-gray-400 bg-white"
+              >
+                {[
+                  { id: 'ANALYSE', label: 'ANALYSE_ME.EXE' },
+                  { id: 'RATE', label: 'RATE_MY_LOOK.EXE' },
+                  { id: 'DEEP_DIVE', label: 'DEEP_DIVE.DOC' },
+                  { id: 'SHOP', label: 'SHOP.EXE' },
+                  { id: 'WISHLIST', label: 'WISHLIST.EXE' }
+                ].map((tab) => (
+                  <button
+                    key={tab.id}
+                    onClick={() => {
+                      setActiveTab(tab.id as Tab);
+                      setIsMenuOpen(false);
+                    }}
+                    className={`w-full p-4 text-left font-bold border-b border-gray-100 flex items-center justify-between ${activeTab === tab.id ? 'text-barbie-pink bg-pink-50' : 'text-dark-blue'}`}
+                  >
+                    <span>[{tab.label}]</span>
+                    {activeTab === tab.id && <Sparkles size={14} />}
+                  </button>
+                ))}
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
 
         {/* Content Area */}
@@ -508,13 +954,27 @@ Suggest specific 90s details in BOLD PINK CAPS (e.g., BUTTERFLY CLIPS, CHUNKY LO
                         disabled={analyzing || limit.count >= SCAN_LIMIT}
                         className="retro-button w-full max-w-xs flex items-center justify-center gap-2"
                       >
-                        {analyzing ? <RefreshCw className="animate-spin" /> : <Zap size={18} />}
-                        SCAN MY STYLE!
+                        {analyzing ? (
+                          <>
+                            <RefreshCw className="animate-spin" size={18} />
+                            <span className="animate-pulse">ANALYZING...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Zap size={18} />
+                            <span>SCAN MY STYLE!</span>
+                          </>
+                        )}
                       </button>
                     </div>
                   </>
                 ) : (
-                  <div className="flex flex-col items-center w-full">
+                  <div className="flex flex-col items-center w-full space-y-6">
+                    <div className="text-center">
+                      <h2 className="text-xl font-bold text-dark-blue italic uppercase tracking-tighter">✨ YOUR STYLE IDENTITY ✨</h2>
+                      <p className="text-[10px] text-gray-500 font-bold uppercase">Analysis complete • Style Engine v4.0</p>
+                    </div>
+
                     <div className="retro-inset w-full bg-white">
                       <div className="flex flex-col">
                         {Object.entries(identityResult).map(([label, value]) => (
@@ -525,17 +985,21 @@ Suggest specific 90s details in BOLD PINK CAPS (e.g., BUTTERFLY CLIPS, CHUNKY LO
                         ))}
                       </div>
                     </div>
-                    <button 
-                      onClick={() => {
-                        setIdentityResult(null);
-                        setDeepDiveResult(null);
-                        saveAppState(preferences, null, null, { idPhotos, lookPhoto });
-                      }}
-                      className="mt-6 text-[10px] font-bold uppercase text-dark-blue hover:underline flex items-center gap-1"
-                    >
-                      <RefreshCw size={10} />
-                      New Scan
-                    </button>
+
+                    <div className="flex flex-col items-center gap-4 w-full">
+                      <button 
+                        onClick={() => {
+                          setIdentityResult(null);
+                          setDeepDiveResult(null);
+                          setIdPhotos([null, null]);
+                          saveAppState(preferences, null, null, { idPhotos: [null, null], lookPhoto });
+                        }}
+                        className="retro-button w-full max-w-xs flex items-center justify-center gap-2"
+                      >
+                        <RefreshCw size={18} />
+                        <span>ANALYSE AGAIN! ✨</span>
+                      </button>
+                    </div>
                   </div>
                 )}
               </motion.div>
@@ -594,8 +1058,17 @@ Suggest specific 90s details in BOLD PINK CAPS (e.g., BUTTERFLY CLIPS, CHUNKY LO
                           disabled={analyzing || !lookPhoto}
                           className="retro-button w-full max-w-xs flex items-center justify-center gap-2"
                         >
-                          {analyzing ? <RefreshCw className="animate-spin" /> : <Search size={18} />}
-                          SCAN MY LOOK!
+                          {analyzing ? (
+                            <>
+                              <RefreshCw className="animate-spin" size={18} />
+                              <span className="animate-pulse">GRADING...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Search size={18} />
+                              <span>SCAN MY LOOK!</span>
+                            </>
+                          )}
                         </button>
                       </>
                     ) : (
@@ -656,8 +1129,17 @@ Suggest specific 90s details in BOLD PINK CAPS (e.g., BUTTERFLY CLIPS, CHUNKY LO
                         disabled={analyzing}
                         className="retro-button w-full max-w-xs flex items-center justify-center gap-2"
                       >
-                        {analyzing ? <RefreshCw className="animate-spin" /> : <FileText size={18} />}
-                        GENERATE MY MANUAL!
+                        {analyzing ? (
+                          <>
+                            <RefreshCw className="animate-spin" size={18} />
+                            <span className="animate-pulse">DIVING DEEP...</span>
+                          </>
+                        ) : (
+                          <>
+                            <FileText size={18} />
+                            <span>GENERATE MY MANUAL!</span>
+                          </>
+                        )}
                       </button>
                     )}
 
@@ -674,6 +1156,192 @@ Suggest specific 90s details in BOLD PINK CAPS (e.g., BUTTERFLY CLIPS, CHUNKY LO
                         </div>
                       </div>
                     )}
+                  </div>
+                )}
+              </motion.div>
+            )}
+
+            {activeTab === 'SHOP' && (
+              <motion.div 
+                key="shop"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="space-y-6"
+              >
+                <div className="text-center mb-4">
+                  <h2 className="text-xl font-bold text-dark-blue italic">🛍️ SHOP.EXE 🛍️</h2>
+                  <p className="text-xs text-gray-600">Curated styles for your unique vibe! ✨</p>
+                </div>
+
+                {!user ? (
+                  <div className="retro-inset bg-blue-50 border-blue-200 text-blue-600 text-center py-12 space-y-4">
+                    <LogIn className="mx-auto" size={48} />
+                    <p className="font-bold">Login to start shopping your vibe, babe! 💖</p>
+                    <button onClick={handleLogin} className="retro-button px-8">LOGIN NOW</button>
+                  </div>
+                ) : !identityResult ? (
+                  <div className="retro-inset bg-red-50 border-red-200 text-red-600 text-center py-8">
+                    <AlertTriangle className="mx-auto mb-2" />
+                    <p className="font-bold">System Error! Run Identity Scan first! 💖</p>
+                  </div>
+                ) : loadingProducts ? (
+                  <div className="flex flex-col items-center justify-center py-12">
+                    <RefreshCw className="animate-spin text-barbie-pink mb-4" size={48} />
+                    <p className="text-sm font-bold text-dark-blue animate-pulse">LOADING ICONIC STYLES...</p>
+                  </div>
+                ) : products.length > 0 ? (
+                  <div className="flex flex-col items-center gap-8">
+                    <div className="relative w-full max-w-sm aspect-[3/4] retro-window overflow-hidden group">
+                      <AnimatePresence mode="wait">
+                        <motion.div
+                          key={products[currentProductIndex].id}
+                          initial={{ x: 300, opacity: 0 }}
+                          animate={{ x: 0, opacity: 1 }}
+                          exit={{ x: -300, opacity: 0 }}
+                          className="absolute inset-0 p-4 flex flex-col"
+                        >
+                          <a 
+                            href={products[currentProductIndex].affiliate_link || `https://newme.asia/product/${products[currentProductIndex].id}`} 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            className="flex flex-col h-full group/card cursor-pointer relative z-0"
+                            onClick={(e) => {
+                              console.log('Shop item clicked:', products[currentProductIndex]);
+                              if (!products[currentProductIndex].affiliate_link) {
+                                console.warn('Missing affiliate_link property on product object. Using fallback URL.');
+                              }
+                            }}
+                          >
+                            <div className="flex-1 retro-inset overflow-hidden mb-4 relative">
+                              <img 
+                                src={products[currentProductIndex].image_url} 
+                                className="w-full h-full object-cover transition-transform duration-500 group-hover/card:scale-110"
+                                referrerPolicy="no-referrer"
+                              />
+                              <div className="absolute inset-0 bg-black/0 group-hover/card:bg-black/10 transition-colors flex items-center justify-center">
+                                <ExternalLink className="text-white opacity-0 group-hover/card:opacity-100 transition-opacity" size={32} />
+                              </div>
+                            </div>
+                            <div className="space-y-1">
+                              <h3 className="text-lg font-black text-dark-blue uppercase leading-tight truncate group-hover/card:text-barbie-pink transition-colors">
+                                {products[currentProductIndex].name}
+                              </h3>
+                              <div className="flex justify-between items-center">
+                                <span className="text-barbie-pink font-bold text-xl">
+                                  ₹{products[currentProductIndex].price}
+                                </span>
+                                <span className="text-[10px] font-bold text-gray-500 uppercase">
+                                  {products[currentProductIndex].platform || 'NEWME'}
+                                </span>
+                              </div>
+                            </div>
+                          </a>
+                        </motion.div>
+                      </AnimatePresence>
+                    </div>
+
+                    <div className="flex gap-6 w-full max-w-sm">
+                      <button 
+                        onClick={() => handleSwipe('left')}
+                        className="retro-button flex-1 bg-red-100 hover:bg-red-200 border-red-400 flex items-center justify-center gap-2 py-4"
+                      >
+                        <X size={24} className="text-red-600" />
+                        <span className="font-bold text-red-600">SKIP</span>
+                      </button>
+                      <button 
+                        onClick={() => handleSwipe('right')}
+                        className="retro-button flex-1 bg-green-100 hover:bg-green-200 border-green-400 flex items-center justify-center gap-2 py-4"
+                      >
+                        <Heart size={24} className="text-green-600" />
+                        <span className="font-bold text-green-600">LOVE</span>
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="retro-inset text-center py-12 space-y-4">
+                    <ShoppingBag className="mx-auto text-gray-300" size={64} />
+                    <p className="text-sm font-bold text-gray-500">Ugh, no styles found for your vibe yet! 🛑✨</p>
+                    <button onClick={fetchProducts} className="text-xs text-barbie-pink underline font-bold">RETRY SCAN</button>
+                  </div>
+                )}
+              </motion.div>
+            )}
+
+            {activeTab === 'WISHLIST' && (
+              <motion.div 
+                key="wishlist"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="space-y-6"
+              >
+                <div className="text-center mb-4">
+                  <h2 className="text-xl font-bold text-dark-blue italic">💖 WISHLIST.EXE 💖</h2>
+                  <p className="text-xs text-gray-600">Your collection of iconic looks! ✨</p>
+                </div>
+
+                {!user ? (
+                  <div className="retro-inset bg-blue-50 border-blue-200 text-blue-600 text-center py-12 space-y-4">
+                    <LogIn className="mx-auto" size={48} />
+                    <p className="font-bold">Login to see your saved styles, babe! 💖</p>
+                    <button onClick={handleLogin} className="retro-button px-8">LOGIN NOW</button>
+                  </div>
+                ) : wishlist.length > 0 ? (
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                    {wishlist.map((item) => (
+                      <div key={item.id} className="retro-window p-2 flex flex-col group relative">
+                        <a 
+                          href={item.affiliate_link || `https://newme.asia/product/${item.id}`} 
+                          target="_blank" 
+                          rel="noopener noreferrer"
+                          className="flex flex-col h-full group/item cursor-pointer relative z-0"
+                          onClick={(e) => {
+                            console.log('Wishlist item clicked:', item);
+                            if (!item.affiliate_link) {
+                              console.warn('Missing affiliate_link property on wishlist item. Using fallback URL.');
+                            }
+                          }}
+                        >
+                          <div className="aspect-[3/4] retro-inset overflow-hidden mb-2 relative">
+                            <img 
+                              src={item.image_url} 
+                              className="w-full h-full object-cover transition-transform duration-300 group-hover/item:scale-110"
+                              referrerPolicy="no-referrer"
+                            />
+                            <div className="absolute inset-0 bg-black/0 group-hover/item:bg-black/10 transition-colors flex items-center justify-center">
+                              <ExternalLink className="text-white opacity-0 group-hover/item:opacity-100 transition-opacity" size={16} />
+                            </div>
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <h4 className="text-[10px] font-black text-dark-blue uppercase truncate mb-1 group-hover/item:text-barbie-pink transition-colors">
+                              {item.name}
+                            </h4>
+                            <div className="flex justify-between items-center">
+                              <span className="text-barbie-pink font-bold text-xs">₹{item.price}</span>
+                              <ExternalLink size={12} className="text-dark-blue" />
+                            </div>
+                          </div>
+                        </a>
+                        <button 
+                          onClick={(e) => {
+                            console.log('Remove from wishlist clicked for item:', item.id);
+                            e.preventDefault();
+                            e.stopPropagation();
+                            removeFromWishlist(item.id);
+                          }}
+                          className="absolute top-1 right-1 p-1 bg-white/80 text-red-500 rounded-full opacity-0 group-hover:opacity-100 transition-opacity z-10 pointer-events-none group-hover:pointer-events-auto"
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="retro-inset text-center py-12 space-y-4">
+                    <Heart className="mx-auto text-gray-300" size={64} />
+                    <p className="text-sm font-bold text-gray-500">Your wishlist is empty! Go shopping, bestie! 🛍️✨</p>
+                    <button onClick={() => setActiveTab('SHOP')} className="retro-button px-8">GO TO SHOP</button>
                   </div>
                 )}
               </motion.div>
@@ -711,7 +1379,9 @@ Suggest specific 90s details in BOLD PINK CAPS (e.g., BUTTERFLY CLIPS, CHUNKY LO
             <span>BESTIE_MODE_ON</span>
           </div>
         </div>
-      </div>
+      </>
+    )}
+  </div>
 
       {/* Hidden file input */}
       <input 

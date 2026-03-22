@@ -49,28 +49,17 @@
   @apply text-barbie-pink font-black uppercase;
 }
 
-/* Row-based table styling for retro look */
+/* Row-based table styling for retro look - Responsive */
 .retro-row {
-  display: flex !important;
-  justify-content: space-between !important;
-  align-items: center !important;
-  padding: 12px 0 !important;
-  border-bottom: 1px solid #808080 !important;
+  @apply flex flex-col sm:flex-row sm:justify-between sm:items-center py-3 border-b border-gray-500 gap-1 sm:gap-4;
 }
 
 .retro-row-label {
-  @apply font-bold uppercase text-xs text-dark-blue text-left;
-  white-space: nowrap !important;
-  flex-shrink: 0 !important;
-  margin-right: 16px !important;
+  @apply font-bold uppercase text-[10px] sm:text-xs text-dark-blue text-left shrink-0;
 }
 
 .retro-row-value {
-  @apply text-right font-medium text-sm;
-  white-space: nowrap !important;
-  overflow: hidden !important;
-  text-overflow: ellipsis !important;
-  flex-grow: 1 !important;
+  @apply text-left sm:text-right font-medium text-sm truncate grow;
 }
 
 .deep-dive-content {
