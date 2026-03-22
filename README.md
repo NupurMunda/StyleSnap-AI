@@ -10,12 +10,63 @@ StyleSnap AI is a professional-grade fashion analysis tool that uses AI to help 
 
 ### System Architecture
 StyleSnap AI follows a **Client-Serverless** architecture:
+
+```mermaid
+graph TD
+    subgraph Client_Side [User Browser - React SPA]
+        UI[90s Retro UI / Vite]
+        State[React State / LocalStorage]
+        SDK[Google Generative AI SDK]
+    end
+
+    subgraph AI_Engine [Intelligence Layer]
+        Gemini[Gemini 1.5 Flash]
+        Prompt[System Instructions: Kibbe/Kitchener]
+    end
+
+    subgraph Firebase_BaaS [Backend-as-a-Service]
+        Auth[Firebase Auth: Google Login]
+        RTDB[Realtime DB: Product Scraper Data]
+        Firestore[Firestore: User History & Wishlist]
+    end
+
+    UI --> SDK
+    SDK --> Gemini
+    Gemini --> Prompt
+    UI --> Auth
+    UI --> RTDB
+    UI --> Firestore
+    State --> UI
+```
+
 - **Frontend:** React (Vite) Single Page Application (SPA).
 - **AI Engine:** Google Gemini 1.5 Flash (Multimodal LLM).
 - **Backend-as-a-Service (BaaS):** Firebase (Auth, Firestore, Realtime Database).
 - **Monetization:** Integrated Google AdSense for ad delivery.
 
 ### Data Flow
+The following sequence diagram illustrates the step-by-step logic when a user clicks "Analyze My Style":
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant App as React App (Vite)
+    participant Auth as Firebase Auth
+    participant AI as Gemini 1.5 Flash
+    participant DB as Firebase (RTDB/Firestore)
+
+    User->>App: Uploads Photo + Preferences
+    App->>Auth: Check Session / Login
+    Auth-->>App: User UID
+    App->>DB: Check Daily Quota (stylesnap_v4_limit)
+    DB-->>App: Quota OK
+    App->>AI: Send Image (Base64) + Style Prompt
+    Note over AI: Multi-modal Analysis (Kibbe & Kitchener)
+    AI-->>App: Structured Markdown + JSON
+    App->>DB: Save Result to /analyses/{uid}
+    App-->>User: Render "90s Fashion Bestie" Report
+```
+
 1. **Ingestion:** User uploads an image via the browser.
 2. **Processing:** The image is converted to base64 and dispatched to the Gemini API via the `@google/genai` SDK.
 3. **Reasoning:** Gemini analyzes the image against a specialized "Stylist Knowledge Base" prompt.
@@ -39,7 +90,32 @@ The application is built as a state-driven machine using React Hooks:
   - `systemInstruction`: A 500+ word prompt defining the Kibbe/Kitchener framework.
 - **Multimodal Handling:** Images are processed as `inlineData` parts alongside text prompts.
 
-### 3. Database Schema (Firestore)
+### 3. Database Schema (Firestore & RTDB)
+This maps out how Firestore (User data) and Realtime Database (Scraped products) relate to each other:
+
+```mermaid
+erDiagram
+    USER ||--o{ ANALYSIS : has
+    USER ||--o{ WISHLIST : saves
+    ANALYSIS {
+        string id
+        string kibbe_type
+        string kitchener_essence
+        timestamp created_at
+    }
+    WISHLIST {
+        string product_id
+        timestamp added_at
+    }
+    PRODUCT_SCRAPER_RTDB {
+        string product_id PK
+        string kibbe_tag
+        string affiliate_link
+        string status
+    }
+    WISHLIST }|..|| PRODUCT_SCRAPER_RTDB : "references"
+```
+
 - **`users/{uid}`**: Stores profile info and scan history.
 - **`wishlist/{itemId}`**: Stores products saved from the "Shop" tab.
 - **`analyses/{analysisId}`**: Stores historical AI outputs for user retrieval.
