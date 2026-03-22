@@ -15,6 +15,7 @@ import {
   Star,
   Zap,
   X,
+  Shield,
   Minus,
   Square,
   FileText,
@@ -31,6 +32,8 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import PrivacyPolicy from './components/PrivacyPolicy';
+import TermsOfService from './components/TermsOfService';
 import { 
   auth, 
   loginWithGoogle, 
@@ -81,6 +84,8 @@ interface RateLimit {
 
 const SCAN_LIMIT = 3;
 const RESET_TIME = 24 * 60 * 60 * 1000; // 24 hours
+
+type View = 'APP' | 'PRIVACY' | 'TERMS';
 
 enum OperationType {
   CREATE = 'create',
@@ -146,6 +151,8 @@ const inferCategory = (name: string | undefined | null) => {
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>('ANALYSE');
+  const [currentView, setCurrentView] = useState<View>('APP');
+  const [showCookieConsent, setShowCookieConsent] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [loggingIn, setLoggingIn] = useState(false);
@@ -447,6 +454,18 @@ export default function App() {
     setShowQuotaError(false);
   };
 
+  useEffect(() => {
+    const consent = localStorage.getItem('cookie-consent');
+    if (!consent) {
+      setShowCookieConsent(true);
+    }
+  }, []);
+
+  const handleAcceptCookies = () => {
+    localStorage.setItem('cookie-consent', 'true');
+    setShowCookieConsent(false);
+  };
+
   const getRateLimit = (): RateLimit => {
     const saved = localStorage.getItem('stylesnap_v4_limit');
     if (saved) {
@@ -741,8 +760,21 @@ Suggest specific 90s details in BOLD PINK CAPS.
   };
 
   return (
-    <div className="p-4 md:p-8 flex flex-col items-center">
-      {/* App Header */}
+    <div className="p-4 md:p-8 flex flex-col items-center min-h-screen">
+      <AnimatePresence mode="wait">
+        {currentView === 'PRIVACY' ? (
+          <PrivacyPolicy key="privacy" onBack={() => setCurrentView('APP')} />
+        ) : currentView === 'TERMS' ? (
+          <TermsOfService key="terms" onBack={() => setCurrentView('APP')} />
+        ) : (
+          <motion.div 
+            key="app"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="w-full flex flex-col items-center"
+          >
+            {/* App Header */}
       <div className="w-full max-w-4xl mb-8 flex flex-col items-center relative">
         <div className="absolute right-0 top-0">
           {user && (
@@ -1432,6 +1464,45 @@ Suggest specific 90s details in BOLD PINK CAPS.
           </div>
         </div>
       </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Cookie Consent */}
+      <AnimatePresence>
+        {showCookieConsent && (
+          <motion.div 
+            initial={{ y: 100, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: 100, opacity: 0 }}
+            className="fixed bottom-4 left-4 right-4 z-[100] md:left-auto md:right-4 md:w-96"
+          >
+            <div className="retro-window bg-white p-6 shadow-2xl border-4 border-barbie-pink">
+              <div className="flex items-center gap-2 mb-3">
+                <Shield className="text-barbie-pink" size={20} />
+                <span className="font-black text-dark-blue italic uppercase tracking-tighter">COOKIE_CONSENT.EXE</span>
+              </div>
+              <p className="text-xs text-gray-600 font-medium leading-relaxed mb-4">
+                We use cookies to make your style experience iconic! By clicking "ACCEPT", you agree to our use of cookies for analytics and personalized ads. ✨
+              </p>
+              <div className="flex gap-2">
+                <button 
+                  onClick={() => setCurrentView('PRIVACY')}
+                  className="text-[10px] font-bold text-gray-400 uppercase hover:text-barbie-pink transition-colors"
+                >
+                  LEARN MORE
+                </button>
+                <button 
+                  onClick={handleAcceptCookies}
+                  className="retro-button flex-1 py-2 text-xs font-black"
+                >
+                  ACCEPT ALL
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* System Overload Modal */}
       <AnimatePresence>
@@ -1522,7 +1593,21 @@ Suggest specific 90s details in BOLD PINK CAPS.
       </AnimatePresence>
 
       {/* Footer */}
-      <footer className="mt-8 text-center">
+      <footer className="mt-12 mb-8 text-center space-y-4">
+        <div className="flex justify-center gap-6">
+          <button 
+            onClick={() => setCurrentView('PRIVACY')}
+            className="text-[10px] font-bold text-dark-blue/40 uppercase tracking-widest hover:text-barbie-pink transition-colors"
+          >
+            PRIVACY POLICY
+          </button>
+          <button 
+            onClick={() => setCurrentView('TERMS')}
+            className="text-[10px] font-bold text-dark-blue/40 uppercase tracking-widest hover:text-barbie-pink transition-colors"
+          >
+            TERMS OF SERVICE
+          </button>
+        </div>
         <p className="text-[10px] font-bold text-dark-blue/40 uppercase tracking-[0.4em]">
           © 1999 StyleSnap AI • Totally Rad Tech
         </p>
