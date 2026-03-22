@@ -148,6 +148,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>('ANALYSE');
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
+  const [loggingIn, setLoggingIn] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [preferences, setPreferences] = useState('');
   const [user, setUser] = useState<User | null>(null);
@@ -718,6 +719,8 @@ Suggest specific 90s details in BOLD PINK CAPS.
   const limit = getRateLimit();
 
   const handleLogin = async () => {
+    if (loggingIn) return;
+    setLoggingIn(true);
     setError(null);
     try {
       await loginWithGoogle();
@@ -732,6 +735,8 @@ Suggest specific 90s details in BOLD PINK CAPS.
       } else {
         setError("Login failed! " + (err.message || "Unknown error"));
       }
+    } finally {
+      setLoggingIn(false);
     }
   };
 
@@ -778,10 +783,20 @@ Suggest specific 90s details in BOLD PINK CAPS.
             </div>
             <button 
               onClick={handleLogin} 
-              className="retro-button px-10 py-4 text-lg flex items-center gap-3 group hover:scale-105 transition-transform"
+              disabled={loggingIn}
+              className="retro-button px-10 py-4 text-lg flex items-center gap-3 group hover:scale-105 transition-transform disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              <LogIn className="group-hover:rotate-12 transition-transform" />
-              LOGIN WITH GOOGLE
+              {loggingIn ? (
+                <>
+                  <div className="animate-spin rounded-full h-5 w-5 border-2 border-black border-t-transparent" />
+                  LOADING...
+                </>
+              ) : (
+                <>
+                  <LogIn className="group-hover:rotate-12 transition-transform" />
+                  LOGIN WITH GOOGLE
+                </>
+              )}
             </button>
             <div className="flex flex-col items-center gap-1">
               <p className="text-[10px] text-gray-400 uppercase tracking-widest font-bold">
@@ -1178,7 +1193,13 @@ Suggest specific 90s details in BOLD PINK CAPS.
                   <div className="retro-inset bg-blue-50 border-blue-200 text-blue-600 text-center py-12 space-y-4">
                     <LogIn className="mx-auto" size={48} />
                     <p className="font-bold">Login to start shopping your vibe, babe! 💖</p>
-                    <button onClick={handleLogin} className="retro-button px-8">LOGIN NOW</button>
+                    <button 
+                      onClick={handleLogin} 
+                      disabled={loggingIn}
+                      className="retro-button px-8 disabled:opacity-50"
+                    >
+                      {loggingIn ? 'WAIT...' : 'LOGIN NOW'}
+                    </button>
                   </div>
                 ) : !identityResult ? (
                   <div className="retro-inset bg-red-50 border-red-200 text-red-600 text-center py-8">
@@ -1285,7 +1306,13 @@ Suggest specific 90s details in BOLD PINK CAPS.
                   <div className="retro-inset bg-blue-50 border-blue-200 text-blue-600 text-center py-12 space-y-4">
                     <LogIn className="mx-auto" size={48} />
                     <p className="font-bold">Login to see your saved styles, babe! 💖</p>
-                    <button onClick={handleLogin} className="retro-button px-8">LOGIN NOW</button>
+                    <button 
+                      onClick={handleLogin} 
+                      disabled={loggingIn}
+                      className="retro-button px-8 disabled:opacity-50"
+                    >
+                      {loggingIn ? 'WAIT...' : 'LOGIN NOW'}
+                    </button>
                   </div>
                 ) : wishlist.length > 0 ? (
                   <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
