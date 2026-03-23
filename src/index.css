@@ -55,11 +55,11 @@
 }
 
 .retro-row-label {
-  @apply font-bold uppercase text-[10px] sm:text-xs text-dark-blue text-left shrink-0;
+  @apply font-bold uppercase text-[10px] sm:text-xs text-dark-blue text-left shrink-0 sm:w-32;
 }
 
 .retro-row-value {
-  @apply text-left sm:text-right font-medium text-sm truncate grow;
+  @apply text-left sm:text-right font-medium text-sm break-words grow w-full sm:w-auto;
 }
 
 .deep-dive-content {

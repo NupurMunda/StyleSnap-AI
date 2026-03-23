@@ -33,7 +33,7 @@ service cloud.firestore {
       allow create, update: if isOwner(userId) && isValidUser(request.resource.data);
       
       match /wishlist/{productId} {
-        allow read: if isOwner(userId);
+        allow read: if true; // Allow public read for sharing
         allow create, update: if isOwner(userId) && isValidWishlistItem(request.resource.data);
         allow delete: if isOwner(userId);
       }

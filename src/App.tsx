@@ -27,7 +27,8 @@ import {
   ChevronRight,
   ExternalLink,
   Menu,
-  ChevronDown
+  ChevronDown,
+  Share2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import ReactMarkdown from 'react-markdown';
@@ -68,6 +69,9 @@ type Tab = 'ANALYSE' | 'RATE' | 'DEEP_DIVE' | 'SHOP' | 'WISHLIST';
 interface Product {
   id: string;
   name: string;
+  product_name?: string;
+  productName?: string;
+  title?: string;
   price: string;
   image_url: string;
   affiliate_link: string;
@@ -95,6 +99,59 @@ enum OperationType {
   GET = 'get',
   WRITE = 'write',
 }
+
+/**
+ * Centralized logic to resolve a meaningful product name from various potential database fields.
+ */
+const resolveProductName = (data: any): string => {
+  if (!data) return 'Style Item';
+  
+  const candidates = [
+    data.product_name,
+    data.productName,
+    data.product_title,
+    data.item_name,
+    data.title,
+    data.name,
+    data.label,
+    data.display_name,
+    data.product_label
+  ];
+  
+  const isGeneric = (n: any) => 
+    !n || 
+    typeof n !== 'string' || 
+    n.toLowerCase().includes('style item') || 
+    n.toLowerCase().includes('unknown') ||
+    n.toLowerCase() === 'newme' ||
+    n.toLowerCase() === 'savana';
+  
+  // 1. Try to find the first non-generic name
+  for (const candidate of candidates) {
+    if (!isGeneric(candidate)) return candidate;
+  }
+  
+  // 2. Fallback to URL parsing if all candidates are generic
+  if (data.affiliate_link) {
+    try {
+      const url = new URL(data.affiliate_link);
+      const pathParts = url.pathname.split('/').filter(Boolean);
+      const lastPart = pathParts[pathParts.length - 1];
+      if (lastPart && lastPart.length > 3) {
+        // Clean up common URL suffixes like .html or query params
+        const cleanName = lastPart.split('.')[0].split('?')[0];
+        return cleanName.split(/[\-\_]/).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+      }
+    } catch (e) {}
+  }
+  
+  // 3. Final fallback: find ANY non-empty string among candidates
+  for (const candidate of candidates) {
+    if (candidate && typeof candidate === 'string' && candidate.trim()) return candidate;
+  }
+  
+  return 'Style Item';
+};
 
 interface FirestoreErrorInfo {
   error: string;
@@ -177,6 +234,11 @@ export default function App() {
   const [currentProductIndex, setCurrentProductIndex] = useState(0);
   const [wishlist, setWishlist] = useState<Product[]>([]);
   const [loadingProducts, setLoadingProducts] = useState(false);
+  const [sharedWishlist, setSharedWishlist] = useState<Product[]>([]);
+  const [sharedUserId, setSharedUserId] = useState<string | null>(null);
+  const [isSharedView, setIsSharedView] = useState(false);
+  const [sharing, setSharing] = useState(false);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   // Auth Listener
   useEffect(() => {
@@ -205,10 +267,12 @@ export default function App() {
             const data = doc.data();
             // Only show items that have an affiliate link
             if (data.affiliate_link) {
+              const finalName = resolveProductName(data);
+
               items.push({ 
                 id: doc.id, 
                 ...data,
-                name: data.name || 'Newme Style Item',
+                name: finalName,
                 affiliate_link: data.affiliate_link
               } as Product);
             }
@@ -220,6 +284,39 @@ export default function App() {
       }
     });
     return () => unsubscribe();
+  }, []);
+
+  // Check for shared wishlist in URL
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const sharedUid = params.get('wishlist');
+    if (sharedUid) {
+      setSharedUserId(sharedUid);
+      setIsSharedView(true);
+      setActiveTab('WISHLIST');
+      
+      // Load shared wishlist
+      const wishlistRef = collection(db, 'users', sharedUid, 'wishlist');
+      onSnapshot(wishlistRef, (querySnapshot) => {
+        const items: Product[] = [];
+        querySnapshot.forEach((doc) => {
+          const data = doc.data();
+          if (data.affiliate_link) {
+            const finalName = resolveProductName(data);
+            items.push({ 
+              id: doc.id, 
+              ...data,
+              name: finalName,
+              affiliate_link: data.affiliate_link
+            } as Product);
+          }
+        });
+        setSharedWishlist(items);
+      }, (error) => {
+        console.error('Error loading shared wishlist:', error);
+        setError('Could not load shared wishlist. It might be private or the link is invalid.');
+      });
+    }
   }, []);
 
   // Fetch Products when identity is available
@@ -246,25 +343,35 @@ export default function App() {
   const fetchProducts = async () => {
     setLoadingProducts(true);
     setError(null);
-    const productsRef = ref(rtdb, 'products/newme');
+    const productsRef = ref(rtdb, 'products'); // Fetch all platforms (newme, savana, etc.)
     try {
       const snapshot = await get(productsRef);
       if (snapshot.exists()) {
         const allProducts: any[] = [];
-        snapshot.forEach((childSnapshot) => {
-          const val = childSnapshot.val();
-          if (val && typeof val === 'object' && val.affiliate_link) {
-            const productData = {
-              id: childSnapshot.key,
-              ...val,
-              name: val.name || 'Newme Style Item',
-              affiliate_link: val.affiliate_link
-            };
-            allProducts.push(productData);
-          }
+        
+        // Iterate through platforms (e.g., 'newme', 'savana')
+        snapshot.forEach((platformSnapshot) => {
+          const platformName = platformSnapshot.key || 'Unknown';
+          
+          // Iterate through products in each platform
+          platformSnapshot.forEach((childSnapshot) => {
+            const val = childSnapshot.val();
+            if (val && typeof val === 'object' && val.affiliate_link) {
+              const productName = resolveProductName(val);
+              
+              const productData = {
+                id: childSnapshot.key,
+                ...val,
+                platform: platformName,
+                name: productName,
+                affiliate_link: val.affiliate_link
+              };
+              allProducts.push(productData);
+            }
+          });
         });
 
-        // Filter by Kibbe and Kitchener, and exclude wishlisted items
+        // Smart Tokenized Filter
         const filtered = allProducts.filter(p => {
           const userKibbe = (identityResult?.['BODY TYPE'] || '').toLowerCase();
           const userEssence = (identityResult?.['ESSENCE'] || '').toLowerCase();
@@ -272,14 +379,27 @@ export default function App() {
           const pKibbe = String(p.kibbe_type || '').toLowerCase();
           const pEssence = String(p.kitchener_essence || '').toLowerCase();
 
+          // Helper to break strings into searchable tokens (words)
+          const tokenize = (str: string) => 
+            str.split(/[\s\-\,\(\)\/]+/).filter(t => t.length > 2);
+          
+          const uKibbeTokens = tokenize(userKibbe);
+          const uEssenceTokens = tokenize(userEssence);
+          const pKibbeTokens = tokenize(pKibbe);
+          const pEssenceTokens = tokenize(pEssence);
+
           // If no type/essence defined on product, don't show it
-          if (!pKibbe && !pEssence) return false;
+          if (pKibbeTokens.length === 0 && pEssenceTokens.length === 0) return false;
 
           // Exclude if already in wishlist
           const isWishlisted = wishlist.some(w => w.id === p.id);
           if (isWishlisted) return false;
 
-          return (pKibbe && userKibbe.includes(pKibbe)) || (pEssence && userEssence.includes(pEssence));
+          // Match if any product token exists in the user's analyzed tokens
+          const hasKibbeMatch = pKibbeTokens.some(t => uKibbeTokens.includes(t));
+          const hasEssenceMatch = pEssenceTokens.some(t => uEssenceTokens.includes(t));
+
+          return hasKibbeMatch || hasEssenceMatch;
         });
 
         // Randomize the order
@@ -305,8 +425,7 @@ export default function App() {
     }
     try {
       const wishlistDocRef = doc(db, 'users', user.uid, 'wishlist', product.id);
-      // Ensure we have a name and link before saving
-      const name = product.name || 'Newme Style Item';
+      const name = resolveProductName(product);
       const affiliate_link = product.affiliate_link;
       
       if (!affiliate_link) {
@@ -338,6 +457,22 @@ export default function App() {
       await deleteDoc(wishlistDocRef);
     } catch (err: any) {
       handleFirestoreError(err, OperationType.DELETE, 'users/' + user.uid + '/wishlist/' + productId);
+    }
+  };
+
+  const handleShareWishlist = async () => {
+    if (!user) return;
+    setSharing(true);
+    try {
+      const shareUrl = `${window.location.origin}${window.location.pathname}?wishlist=${user.uid}`;
+      await navigator.clipboard.writeText(shareUrl);
+      setSuccessMessage('Wishlist link copied to clipboard! 💖✨');
+      setTimeout(() => setSuccessMessage(null), 3000);
+    } catch (err) {
+      console.error('Failed to copy share link:', err);
+      setError('Failed to copy share link. Please try again.');
+    } finally {
+      setSharing(false);
     }
   };
 
@@ -583,6 +718,13 @@ Analyze Skin undertone, Depth, Contrast, and Chroma.
 
 TASK: Analyze the user's style identity based on the photos and their preferences.
 USER PREFERENCES: ${preferences}
+
+### FIELD DEFINITIONS:
+- BODY TYPE: The Kibbe body type (e.g., Soft Gamine, Dramatic Classic).
+- SEASON: The seasonal color palette (e.g., Deep Autumn, Cool Summer).
+- ESSENCE: The Kitchener essence blend (e.g., Ingenue-Romantic-Gamine).
+- ROOTS: The core style elements and details that define this identity (e.g., ruffles, lace, broken lines, animated detail). DO NOT just repeat the user's preferences; translate them into professional style roots.
+- CELEB TWIN: A famous person with a similar style identity.
 
 OUTPUT FORMAT: Return a JSON object with the specified schema.` },
               ...imageParts
@@ -1025,9 +1167,9 @@ Suggest specific 90s details in BOLD PINK CAPS.
                     <div className="retro-inset w-full bg-white">
                       <div className="flex flex-col">
                         {Object.entries(identityResult).map(([label, value]) => (
-                          <div key={label} className="retro-row">
+                          <div key={label} className="retro-row px-2">
                             <span className="retro-row-label">{label}</span>
-                            <span className="retro-row-value">{value}</span>
+                            <span className="retro-row-value whitespace-pre-wrap">{value}</span>
                           </div>
                         ))}
                       </div>
@@ -1329,79 +1471,151 @@ Suggest specific 90s details in BOLD PINK CAPS.
                 exit={{ opacity: 0 }}
                 className="space-y-6"
               >
-                <div className="text-center mb-4">
-                  <h2 className="text-xl font-bold text-dark-blue italic">💖 WISHLIST.EXE 💖</h2>
-                  <p className="text-xs text-gray-600">Your collection of iconic looks! ✨</p>
+                <div className="text-center mb-4 relative">
+                  <h2 className="text-xl font-bold text-dark-blue italic">
+                    {isSharedView ? '✨ SHARED_WISHLIST.EXE ✨' : '💖 WISHLIST.EXE 💖'}
+                  </h2>
+                  <p className="text-xs text-gray-600">
+                    {isSharedView ? 'Viewing a curated collection! ✨' : 'Your collection of iconic looks! ✨'}
+                  </p>
+                  
+                  {!isSharedView && user && wishlist.length > 0 && (
+                    <button 
+                      onClick={handleShareWishlist}
+                      disabled={sharing}
+                      className="absolute top-0 right-0 retro-button p-2 flex items-center gap-2 text-[10px]"
+                    >
+                      <Share2 size={14} />
+                      {sharing ? 'SHARING...' : 'SHARE'}
+                    </button>
+                  )}
+                  
+                  {isSharedView && (
+                    <button 
+                      onClick={() => {
+                        setIsSharedView(false);
+                        setSharedUserId(null);
+                        setSharedWishlist([]);
+                        window.history.pushState({}, '', window.location.pathname);
+                      }}
+                      className="absolute top-0 left-0 retro-button p-2 flex items-center gap-2 text-[10px]"
+                    >
+                      <X size={14} />
+                      BACK
+                    </button>
+                  )}
                 </div>
 
-                {!user ? (
-                  <div className="retro-inset bg-blue-50 border-blue-200 text-blue-600 text-center py-12 space-y-4">
-                    <LogIn className="mx-auto" size={48} />
-                    <p className="font-bold">Login to see your saved styles, babe! 💖</p>
-                    <button 
-                      onClick={handleLogin} 
-                      disabled={loggingIn}
-                      className="retro-button px-8 disabled:opacity-50"
-                    >
-                      {loggingIn ? 'WAIT...' : 'LOGIN NOW'}
-                    </button>
-                  </div>
-                ) : wishlist.length > 0 ? (
-                  <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                    {wishlist.map((item) => (
-                      <div key={item.id} className="retro-window p-2 flex flex-col group relative">
-                        <a 
-                          href={item.affiliate_link || `https://newme.asia/product/${item.id}`} 
-                          target="_blank" 
-                          rel="noopener noreferrer"
-                          className="flex flex-col h-full group/item cursor-pointer relative z-0"
-                          onClick={(e) => {
-                            console.log('Wishlist item clicked:', item);
-                            if (!item.affiliate_link) {
-                              console.warn('Missing affiliate_link property on wishlist item. Using fallback URL.');
-                            }
-                          }}
-                        >
-                          <div className="aspect-[3/4] retro-inset overflow-hidden mb-2 relative">
-                            <img 
-                              src={item.image_url} 
-                              className="w-full h-full object-cover transition-transform duration-300 group-hover/item:scale-110"
-                              referrerPolicy="no-referrer"
-                            />
-                            <div className="absolute inset-0 bg-black/0 group-hover/item:bg-black/10 transition-colors flex items-center justify-center">
-                              <ExternalLink className="text-white opacity-0 group-hover/item:opacity-100 transition-opacity" size={16} />
+                {isSharedView ? (
+                  sharedWishlist.length > 0 ? (
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                      {sharedWishlist.map((item) => (
+                        <div key={item.id} className="retro-window p-2 flex flex-col group relative">
+                          <a 
+                            href={item.affiliate_link || `https://newme.asia/product/${item.id}`} 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            className="flex flex-col h-full group/item cursor-pointer relative z-0"
+                          >
+                            <div className="aspect-[3/4] retro-inset overflow-hidden mb-2 relative">
+                              <img 
+                                src={item.image_url} 
+                                className="w-full h-full object-cover transition-transform duration-300 group-hover/item:scale-110"
+                                referrerPolicy="no-referrer"
+                              />
+                              <div className="absolute inset-0 bg-black/0 group-hover/item:bg-black/10 transition-colors flex items-center justify-center">
+                                <ExternalLink className="text-white opacity-0 group-hover/item:opacity-100 transition-opacity" size={16} />
+                              </div>
                             </div>
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <h4 className="text-[10px] font-black text-dark-blue uppercase truncate mb-1 group-hover/item:text-barbie-pink transition-colors">
-                              {item.name}
-                            </h4>
-                            <div className="flex justify-between items-center">
-                              <span className="text-barbie-pink font-bold text-xs">₹{item.price}</span>
-                              <ExternalLink size={12} className="text-dark-blue" />
+                            <div className="flex-1 min-w-0">
+                              <h4 className="text-xs font-black text-dark-blue uppercase truncate mb-1 group-hover/item:text-barbie-pink transition-colors">
+                                {item.name}
+                              </h4>
+                              <div className="flex justify-between items-center">
+                                <span className="text-barbie-pink font-bold text-xs">₹{item.price}</span>
+                                <ExternalLink size={12} className="text-dark-blue" />
+                              </div>
                             </div>
-                          </div>
-                        </a>
-                        <button 
-                          onClick={(e) => {
-                            console.log('Remove from wishlist clicked for item:', item.id);
-                            e.preventDefault();
-                            e.stopPropagation();
-                            removeFromWishlist(item.id);
-                          }}
-                          className="absolute top-1 right-1 p-1 bg-white/80 text-red-500 rounded-full opacity-0 group-hover:opacity-100 transition-opacity z-10 pointer-events-none group-hover:pointer-events-auto"
-                        >
-                          <Trash2 size={12} />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
+                          </a>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="retro-inset text-center py-12 space-y-4">
+                      <ShoppingBag className="mx-auto text-gray-300" size={64} />
+                      <p className="text-sm font-bold text-gray-500">This shared wishlist is empty! 🛑✨</p>
+                    </div>
+                  )
                 ) : (
-                  <div className="retro-inset text-center py-12 space-y-4">
-                    <Heart className="mx-auto text-gray-300" size={64} />
-                    <p className="text-sm font-bold text-gray-500">Your wishlist is empty! Go shopping, bestie! 🛍️✨</p>
-                    <button onClick={() => setActiveTab('SHOP')} className="retro-button px-8">GO TO SHOP</button>
-                  </div>
+                  !user ? (
+                    <div className="retro-inset bg-blue-50 border-blue-200 text-blue-600 text-center py-12 space-y-4">
+                      <LogIn className="mx-auto" size={48} />
+                      <p className="font-bold">Login to see your saved styles, babe! 💖</p>
+                      <button 
+                        onClick={handleLogin} 
+                        disabled={loggingIn}
+                        className="retro-button px-8 disabled:opacity-50"
+                      >
+                        {loggingIn ? 'WAIT...' : 'LOGIN NOW'}
+                      </button>
+                    </div>
+                  ) : wishlist.length > 0 ? (
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                      {wishlist.map((item) => (
+                        <div key={item.id} className="retro-window p-2 flex flex-col group relative">
+                          <a 
+                            href={item.affiliate_link || `https://newme.asia/product/${item.id}`} 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            className="flex flex-col h-full group/item cursor-pointer relative z-0"
+                            onClick={(e) => {
+                              console.log('Wishlist item clicked:', item);
+                              if (!item.affiliate_link) {
+                                console.warn('Missing affiliate_link property on wishlist item. Using fallback URL.');
+                              }
+                            }}
+                          >
+                            <div className="aspect-[3/4] retro-inset overflow-hidden mb-2 relative">
+                              <img 
+                                src={item.image_url} 
+                                className="w-full h-full object-cover transition-transform duration-300 group-hover/item:scale-110"
+                                referrerPolicy="no-referrer"
+                              />
+                              <div className="absolute inset-0 bg-black/0 group-hover/item:bg-black/10 transition-colors flex items-center justify-center">
+                                <ExternalLink className="text-white opacity-0 group-hover/item:opacity-100 transition-opacity" size={16} />
+                              </div>
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <h4 className="text-xs font-black text-dark-blue uppercase truncate mb-1 group-hover/item:text-barbie-pink transition-colors">
+                                {item.name}
+                              </h4>
+                              <div className="flex justify-between items-center">
+                                <span className="text-barbie-pink font-bold text-xs">₹{item.price}</span>
+                                <ExternalLink size={12} className="text-dark-blue" />
+                              </div>
+                            </div>
+                          </a>
+                          <button 
+                            onClick={(e) => {
+                              console.log('Remove from wishlist clicked for item:', item.id);
+                              e.preventDefault();
+                              e.stopPropagation();
+                              removeFromWishlist(item.id);
+                            }}
+                            className="absolute top-1 right-1 p-1 bg-white/80 text-red-500 rounded-full opacity-0 group-hover:opacity-100 transition-opacity z-10 pointer-events-none group-hover:pointer-events-auto"
+                          >
+                            <Trash2 size={12} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="retro-inset text-center py-12 space-y-4">
+                      <Heart className="mx-auto text-gray-300" size={64} />
+                      <p className="text-sm font-bold text-gray-500">Your wishlist is empty! Go shopping, bestie! 🛍️✨</p>
+                      <button onClick={() => setActiveTab('SHOP')} className="retro-button px-8">GO TO SHOP</button>
+                    </div>
+                  )
                 )}
               </motion.div>
             )}
@@ -1541,6 +1755,23 @@ Suggest specific 90s details in BOLD PINK CAPS.
               </div>
             </motion.div>
           </div>
+        )}
+      </AnimatePresence>
+
+      {/* Success Notification */}
+      <AnimatePresence>
+        {successMessage && (
+          <motion.div 
+            initial={{ opacity: 0, y: 50 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 50 }}
+            className="fixed bottom-8 left-1/2 -translate-x-1/2 z-[100] retro-window bg-green-50 border-green-400 p-4 flex items-center gap-3 shadow-2xl"
+          >
+            <Sparkles className="text-green-600" size={20} />
+            <span className="font-bold text-green-700 text-sm uppercase tracking-tight">
+              {successMessage}
+            </span>
+          </motion.div>
         )}
       </AnimatePresence>
 
