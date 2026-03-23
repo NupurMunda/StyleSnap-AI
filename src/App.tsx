@@ -287,8 +287,18 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // Check for shared wishlist in URL
+  // Check for shared wishlist in URL or manual path routing
   useEffect(() => {
+    const path = window.location.pathname;
+    if (path === '/privacy') {
+      setCurrentView('PRIVACY');
+      return;
+    }
+    if (path === '/terms') {
+      setCurrentView('TERMS');
+      return;
+    }
+
     const params = new URLSearchParams(window.location.search);
     const sharedUid = params.get('wishlist');
     if (sharedUid) {
