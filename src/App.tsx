@@ -132,9 +132,10 @@ const resolveProductName = (data: any): string => {
   }
   
   // 2. Fallback to URL parsing if all candidates are generic
-  if (data.affiliate_link) {
+  const link = data.affiliate_link || data.product_url;
+  if (link) {
     try {
-      const url = new URL(data.affiliate_link);
+      const url = new URL(link);
       const pathParts = url.pathname.split('/').filter(Boolean);
       const lastPart = pathParts[pathParts.length - 1];
       if (lastPart && lastPart.length > 3) {
@@ -352,11 +353,17 @@ export default function App() {
         // Iterate through platforms (e.g., 'newme', 'savana')
         snapshot.forEach((platformSnapshot) => {
           const platformName = platformSnapshot.key || 'Unknown';
+          const platformData = platformSnapshot.val();
           
-          // Iterate through products in each platform
-          platformSnapshot.forEach((childSnapshot) => {
+          // Support both flat structure (products/newme/prod1) 
+          // and nested structure (products/newme/products/prod1)
+          const productsSource = (platformData && platformData.products && typeof platformData.products === 'object') 
+            ? platformSnapshot.child('products') 
+            : platformSnapshot;
+          
+          productsSource.forEach((childSnapshot) => {
             const val = childSnapshot.val();
-            if (val && typeof val === 'object' && val.affiliate_link) {
+            if (val && typeof val === 'object' && (val.affiliate_link || val.product_url)) {
               const productName = resolveProductName(val);
               
               const productData = {
@@ -364,7 +371,7 @@ export default function App() {
                 ...val,
                 platform: platformName,
                 name: productName,
-                affiliate_link: val.affiliate_link
+                affiliate_link: val.affiliate_link || val.product_url
               };
               allProducts.push(productData);
             }
