@@ -1619,9 +1619,9 @@ Suggest specific 90s details in BOLD PINK CAPS.
                               e.stopPropagation();
                               removeFromWishlist(item.id);
                             }}
-                            className="absolute top-1 right-1 p-1 bg-white/80 text-red-500 rounded-full opacity-0 group-hover:opacity-100 transition-opacity z-10 pointer-events-none group-hover:pointer-events-auto"
+                            className="absolute top-1 right-1 p-1.5 bg-white/90 text-red-500 rounded-full shadow-md md:opacity-0 md:group-hover:opacity-100 transition-opacity z-10 md:pointer-events-none md:group-hover:pointer-events-auto border border-red-100"
                           >
-                            <Trash2 size={12} />
+                            <Trash2 size={10} />
                           </button>
                         </div>
                       ))}
