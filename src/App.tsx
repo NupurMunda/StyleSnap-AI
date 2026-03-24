@@ -258,6 +258,8 @@ export default function App() {
             if (data.idPhotos) setIdPhotos(data.idPhotos);
             if (data.lookPhoto) setLookPhoto(data.lookPhoto);
           }
+        }, (error) => {
+          handleFirestoreError(error, OperationType.GET, 'users/' + currentUser.uid);
         });
 
         // Load wishlist from Firestore
@@ -752,9 +754,9 @@ OUTPUT FORMAT: Return a JSON object with the specified schema.` },
           model: "gemini-3-flash-preview",
           contents: [{
             parts: [
-              { text: `ROLE: You are the "StyleSnap AI Engine," a professional image consultant. Your tone is "90s fashion bestie."
+              { text: `ROLE: You are the "StyleSnap AI Engine," a professional image consultant. Your tone is "90s fashion expert."
 
-TASK: Provide a detailed "Bestie Manual" based on the logic of Kibbe, Kitchener, and Seasonal Color Analysis.
+TASK: Provide a detailed "Style Manual" based on the logic of Kibbe, Kitchener, and Seasonal Color Analysis.
 CONSTRAINTS: Use BOLD PINK CAPS for all item recommendations and ICONIC swaps.
 
 OUTPUT FORMAT:
@@ -768,7 +770,7 @@ Why their palette works and specific ICONIC swaps in BOLD PINK CAPS.
 Suggest specific 90s details in BOLD PINK CAPS.
 
 ### EMPOWERMENT
-"You are a total star, bestie! 💖✨"` },
+"You are a total star! 💖✨"` },
               ...imageParts
             ]
           }]
@@ -827,14 +829,14 @@ Suggest specific 90s details in BOLD PINK CAPS.
         model: "gemini-3-flash-preview",
         contents: [{
           parts: [
-            { text: `ROLE: You are the "StyleSnap AI Engine," a professional 90s fashion bestie and outfit coach.
+            { text: `ROLE: You are the "StyleSnap AI Engine," a professional 90s fashion expert and outfit coach.
             CONTEXT: The user's identity is: ${JSON.stringify(identityResult)}. 
             TASK: Grade this outfit and provide "Level Up" coaching.
             
             OUTPUT FORMAT:
             - MATCH SCORE: [X/10] 🌟
             - THE VIBE: 1-sentence description.
-            - BESTIE ENHANCEMENTS (The "Level Up"):
+            - STYLE ENHANCEMENTS (The "Level Up"):
               * [Focus on Balance]
               * [Focus on Color]
               * [Focus on Detail]` },
@@ -850,6 +852,29 @@ Suggest specific 90s details in BOLD PINK CAPS.
       setError("System glitch! " + (err.message || "Unknown error"));
     } finally {
       setAnalyzing(false);
+    }
+  };
+
+  const handleShareVerdict = async () => {
+    if (!deepDiveResult) return;
+    setSharing(true);
+    try {
+      const shareData = {
+        title: 'My Style Verdict ✨',
+        text: `Check out my personal style manual from StyleSnap AI! 💖\n\n${deepDiveResult.slice(0, 200)}...`,
+        url: window.location.href
+      };
+
+      if (navigator.share) {
+        await navigator.share(shareData);
+      } else {
+        await navigator.clipboard.writeText(`${shareData.text}\n\nRead more at: ${shareData.url}`);
+        alert('Verdict copied to clipboard! Share it with your friends! 💖✨');
+      }
+    } catch (err) {
+      console.error('Share error:', err);
+    } finally {
+      setSharing(false);
     }
   };
 
@@ -871,15 +896,19 @@ Suggest specific 90s details in BOLD PINK CAPS.
         model: "gemini-3-flash-preview",
         contents: [{
           parts: [
-            { text: `ROLE: 90s fashion bestie. 
+            { text: `ROLE: 90s fashion expert. 
+            TONE: High-energy, relatable, and educational. Use phrases like "OMG bestie", "literal [Season] queen", and "total style icon".
             CONTEXT: The user's identity is: ${JSON.stringify(identityResult)}. 
-            TASK: Provide a detailed "Deep Dive" explanation.
-            CONSTRAINTS: Use BOLD PINK CAPS for all item recommendations and accessory upgrades.
+            TASK: Provide a detailed "Deep Dive" explanation of their style identity.
+            CONSTRAINTS: 
+            - Use BOLD PINK CAPS for all item recommendations and accessory upgrades.
+            - Explain the "WHY" behind the recommendations (e.g., why certain lines work for their essence).
+            - Use bullet points with emojis for lists of items.
             OUTPUT FORMAT:
-            - THE VERDICT: A deep paragraph explaining the harmony of their lines/essence.
+            - THE VERDICT: A deep, educational paragraph explaining the harmony of their lines/essence.
             - COLOUR STORY: Explain why their Season works and suggest iconic color swaps.
-            - STYLE HACK (ICONIC): Specific item upgrades in BOLD PINK CAPS.
-            - EMPOWERMENT: End with: "You are a total star, bestie! 💖✨"` }
+            - STYLE MANUAL (ICONIC): A bulleted list of specific item upgrades in BOLD PINK CAPS, each with a relevant emoji.
+            - EMPOWERMENT: End with: "You are a total star! 💖✨"` }
           ]
         }]
       });
@@ -934,24 +963,42 @@ Suggest specific 90s details in BOLD PINK CAPS.
             className="w-full flex flex-col items-center"
           >
             {/* App Header */}
-      <div className="w-full max-w-4xl mb-8 flex flex-col items-center relative">
-        <div className="absolute right-0 top-0">
-          {user && (
-            <div className="flex items-center gap-3">
-              <img src={user.photoURL || ''} className="w-8 h-8 rounded-full border-2 border-barbie-pink" />
-              <button onClick={logout} className="retro-button p-1 px-3 text-[10px] flex items-center gap-1">
-                <LogOut size={12} /> LOGOUT
-              </button>
-            </div>
-          )}
-        </div>
-        <h1 className="text-4xl md:text-6xl font-black text-barbie-pink italic tracking-tighter drop-shadow-[2px_2px_0px_rgba(0,0,0,1)] mb-2">
-          STYLESNAP AI
-        </h1>
-        <p className="text-xs font-bold uppercase tracking-[0.3em] text-dark-blue">
-          V4.0 • STYLE_ENGINE.EXE
-        </p>
-      </div>
+            <header className="sticky top-0 z-50 w-full bg-pastel-pink/95 backdrop-blur-md border-b-4 border-barbie-pink py-3 mb-8 shadow-md">
+              <div className="w-full max-w-4xl mx-auto px-4 flex items-center justify-between gap-2">
+                {/* Left side spacer for desktop centering */}
+                <div className="w-24 hidden md:block" />
+
+                {/* Center: Title & Version */}
+                <div className="flex flex-col items-center flex-1 min-w-0">
+                  <h1 className="text-2xl md:text-4xl font-black text-barbie-pink italic tracking-tighter drop-shadow-[2px_2px_0px_rgba(0,0,0,1)] leading-none truncate">
+                    STYLESNAP AI
+                  </h1>
+                  <p className="text-[8px] md:text-[9px] font-bold uppercase tracking-[0.4em] text-dark-blue/60 mt-1">
+                    V4.0 • STYLE_ENGINE.EXE
+                  </p>
+                </div>
+
+                {/* Right: User & Logout */}
+                <div className="w-auto md:w-24 flex justify-end shrink-0">
+                  {user && (
+                    <div className="flex items-center gap-2">
+                      <img 
+                        src={user.photoURL || ''} 
+                        className="w-6 h-6 rounded-full border-2 border-barbie-pink hidden sm:block" 
+                        alt="User"
+                        referrerPolicy="no-referrer"
+                      />
+                      <button 
+                        onClick={logout} 
+                        className="bg-white text-barbie-pink border-2 border-barbie-pink px-2 py-1 text-[8px] font-black uppercase tracking-tighter shadow-[1px_1px_0px_0px_rgba(0,0,0,1)] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none transition-all flex items-center gap-1 h-6"
+                      >
+                        <LogOut size={10} /> <span className="hidden sm:inline">LOGOUT</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </header>
 
       {/* Main Window */}
       <div className="w-full max-w-4xl retro-window">
@@ -1004,7 +1051,7 @@ Suggest specific 90s details in BOLD PINK CAPS.
             <div className="retro-title-bar">
               <div className="flex items-center gap-2">
                 <Sparkles size={14} />
-                <span>StyleSnap_Bestie.exe</span>
+                <span>StyleSnap_Engine.exe</span>
               </div>
               <div className="flex gap-1">
                 <div className="w-4 h-4 bg-retro-grey border border-gray-600 flex items-center justify-center text-black text-[10px]"><Minus size={10}/></div>
@@ -1350,16 +1397,32 @@ Suggest specific 90s details in BOLD PINK CAPS.
                     )}
 
                     {deepDiveResult && (
-                      <div className="retro-inset w-full bg-white max-h-[500px] overflow-auto">
-                        <div className="prose prose-sm prose-pink max-w-none deep-dive-content">
-                          <ReactMarkdown 
-                            components={{
-                              strong: ({node, ...props}) => <span className="bold-pink-caps" {...props} />
-                            }}
-                          >
-                            {deepDiveResult}
-                          </ReactMarkdown>
+                      <div className="flex flex-col items-center gap-6 w-full">
+                        <div className="retro-inset w-full bg-white max-h-[500px] overflow-auto">
+                          <div className="prose prose-sm prose-pink max-w-none deep-dive-content">
+                            <ReactMarkdown 
+                              components={{
+                                strong: ({node, ...props}) => <span className="bold-pink-caps" {...props} />,
+                                li: ({node, ...props}) => <li className="mb-2 list-none" {...props} />
+                              }}
+                            >
+                              {deepDiveResult}
+                            </ReactMarkdown>
+                          </div>
                         </div>
+                        
+                        <button 
+                          onClick={handleShareVerdict}
+                          disabled={sharing}
+                          className="retro-button w-full max-w-xs flex items-center justify-center gap-2"
+                        >
+                          {sharing ? (
+                            <RefreshCw className="animate-spin" size={18} />
+                          ) : (
+                            <Share2 size={18} />
+                          )}
+                          <span>SHARE MY VERDICT! ✨</span>
+                        </button>
                       </div>
                     )}
                   </div>
@@ -1489,10 +1552,10 @@ Suggest specific 90s details in BOLD PINK CAPS.
                 className="space-y-6"
               >
                 <div className="text-center mb-4 relative">
-                  <h2 className="text-xl font-bold text-dark-blue italic">
+                  <h2 className="text-xl font-bold text-dark-blue italic px-12">
                     {isSharedView ? '✨ SHARED_WISHLIST.EXE ✨' : '💖 WISHLIST.EXE 💖'}
                   </h2>
-                  <p className="text-xs text-gray-600">
+                  <p className="text-xs text-gray-600 px-12">
                     {isSharedView ? 'Viewing a curated collection! ✨' : 'Your collection of iconic looks! ✨'}
                   </p>
                   
@@ -1500,10 +1563,10 @@ Suggest specific 90s details in BOLD PINK CAPS.
                     <button 
                       onClick={handleShareWishlist}
                       disabled={sharing}
-                      className="absolute top-0 right-0 retro-button p-2 flex items-center gap-2 text-[10px]"
+                      className="absolute top-0 right-0 retro-button p-2 flex items-center justify-center"
+                      title={sharing ? 'SHARING...' : 'SHARE'}
                     >
-                      <Share2 size={14} />
-                      {sharing ? 'SHARING...' : 'SHARE'}
+                      <Share2 size={14} className={sharing ? 'animate-spin' : ''} />
                     </button>
                   )}
                   
@@ -1629,7 +1692,7 @@ Suggest specific 90s details in BOLD PINK CAPS.
                   ) : (
                     <div className="retro-inset text-center py-12 space-y-4">
                       <Heart className="mx-auto text-gray-300" size={64} />
-                      <p className="text-sm font-bold text-gray-500">Your wishlist is empty! Go shopping, bestie! 🛍️✨</p>
+                      <p className="text-sm font-bold text-gray-500">Your wishlist is empty! Let's find some looks! 🛍️✨</p>
                       <button onClick={() => setActiveTab('SHOP')} className="retro-button px-8">GO TO SHOP</button>
                     </div>
                   )
@@ -1664,9 +1727,8 @@ Suggest specific 90s details in BOLD PINK CAPS.
               CLEAR_DATA
             </button>
           </div>
-          <div className="flex items-center gap-1">
-            <Heart size={10} fill="currentColor" className="text-barbie-pink" />
-            <span>BESTIE_MODE_ON</span>
+          <div className="opacity-50">
+            {/* Right side spacer */}
           </div>
         </div>
       </>
@@ -1691,7 +1753,7 @@ Suggest specific 90s details in BOLD PINK CAPS.
           </div>
           <div>
             <p className="text-xs font-bold text-dark-blue uppercase">Get 20% off at The Gap!</p>
-            <p className="text-[10px] text-gray-500">Use code: BESTIE99 at checkout. ✨</p>
+            <p className="text-[10px] text-gray-500">Use code: STYLE99 at checkout. ✨</p>
           </div>
         </div>
       </div>
@@ -1767,7 +1829,7 @@ Suggest specific 90s details in BOLD PINK CAPS.
                   onClick={() => setShowOverload(false)}
                   className="retro-button w-full"
                 >
-                  OKAY, BESTIE! 🎀
+                  OKAY, GOT IT! 🎀
                 </button>
               </div>
             </motion.div>
@@ -1813,7 +1875,7 @@ Suggest specific 90s details in BOLD PINK CAPS.
                 <div className="text-orange-600 flex justify-center">
                   <AlertTriangle size={48} />
                 </div>
-                <h3 className="text-xl font-bold text-dark-blue uppercase tracking-tight">Memory Full, Bestie!</h3>
+                <h3 className="text-xl font-bold text-dark-blue uppercase tracking-tight">Memory Full!</h3>
                 <p className="text-sm text-gray-700">
                   Ugh, your style files are literally too big for this computer! 🛑✨ We need to clear some space to save new looks.
                 </p>
@@ -1857,7 +1919,7 @@ Suggest specific 90s details in BOLD PINK CAPS.
           </button>
         </div>
         <p className="text-[10px] font-bold text-dark-blue/40 uppercase tracking-[0.4em]">
-          © 1999 StyleSnap AI • Totally Rad Tech
+          © 2026 STYLESNAP AI
         </p>
       </footer>
 

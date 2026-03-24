@@ -72,6 +72,12 @@
 .deep-dive-content p {
   margin-bottom: 25px !important;
 }
+.deep-dive-content ul {
+  @apply list-none p-0 m-0 space-y-3;
+}
+.deep-dive-content li {
+  @apply flex items-start gap-2;
+}
 
 .ad-slot {
   @apply w-full h-[100px] mt-8 bg-white flex items-center justify-center relative overflow-hidden;
