@@ -30,7 +30,7 @@
 }
 
 .retro-button {
-  @apply bg-barbie-pink text-white px-4 py-2 font-bold border-t-2 border-l-2 border-pink-300 border-b-2 border-r-2 border-pink-900 shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none transition-all disabled:opacity-50 disabled:cursor-not-allowed;
+  @apply bg-barbie-pink text-white px-4 py-2 font-bold border-t-2 border-l-2 border-pink-300 border-b-2 border-r-2 border-pink-900 shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none transition-all disabled:bg-gray-400 disabled:border-gray-500 disabled:text-gray-600 disabled:shadow-none disabled:cursor-not-allowed;
 }
 
 .retro-tab {

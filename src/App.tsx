@@ -84,9 +84,10 @@ interface Product {
 interface RateLimit {
   count: number;
   lastReset: number;
+  isFirstTime: boolean;
+  bonusScans: number;
 }
 
-const SCAN_LIMIT = 3;
 const RESET_TIME = 24 * 60 * 60 * 1000; // 24 hours
 
 type View = 'APP' | 'PRIVACY' | 'TERMS';
@@ -224,6 +225,7 @@ export default function App() {
   const [rateResult, setRateResult] = useState<string | null>(null);
   const [deepDiveResult, setDeepDiveResult] = useState<string | null>(null);
   const [showOverload, setShowOverload] = useState(false);
+  const [countdown, setCountdown] = useState('');
   const [showQuotaError, setShowQuotaError] = useState(false);
 
   // Photos
@@ -256,7 +258,7 @@ export default function App() {
             if (data.deepDiveResult) setDeepDiveResult(data.deepDiveResult);
             if (data.preferences) setPreferences(data.preferences);
             if (data.idPhotos) setIdPhotos(data.idPhotos);
-            if (data.lookPhoto) setLookPhoto(data.lookPhoto);
+            // lookPhoto is NOT loaded from Firestore to keep it out of persistent memory
           }
         }, (error) => {
           handleFirestoreError(error, OperationType.GET, 'users/' + currentUser.uid);
@@ -484,15 +486,34 @@ export default function App() {
     setSharing(true);
     try {
       const shareUrl = `${window.location.origin}${window.location.pathname}?wishlist=${user.uid}`;
-      await navigator.clipboard.writeText(shareUrl);
-      setSuccessMessage('Wishlist link copied to clipboard! 💖✨');
-      setTimeout(() => setSuccessMessage(null), 3000);
+      
+      if (navigator.share) {
+        await navigator.share({
+          title: 'My StyleSnap Wishlist 💖',
+          text: 'Check out my iconic style wishlist! ✨',
+          url: shareUrl
+        });
+        grantBonusScan();
+      } else {
+        await navigator.clipboard.writeText(shareUrl);
+        setSuccessMessage('Wishlist link copied to clipboard! 💖✨');
+        setTimeout(() => setSuccessMessage(null), 3000);
+        // Still grant bonus scan for copying if navigator.share is not available
+        grantBonusScan();
+      }
     } catch (err) {
-      console.error('Failed to copy share link:', err);
-      setError('Failed to copy share link. Please try again.');
+      console.error('Failed to share wishlist:', err);
     } finally {
       setSharing(false);
     }
+  };
+
+  const grantBonusScan = () => {
+    const limit = getRateLimit();
+    limit.bonusScans = (limit.bonusScans || 0) + 1;
+    localStorage.setItem('stylesnap_v4_limit', JSON.stringify(limit));
+    setSuccessMessage('Bonus scan unlocked! 🚀✨');
+    setTimeout(() => setSuccessMessage(null), 3000);
   };
 
   const handleSwipe = (direction: 'left' | 'right') => {
@@ -557,7 +578,7 @@ export default function App() {
     if (savedPhotos) {
       const parsed = JSON.parse(savedPhotos);
       if (parsed.idPhotos) setIdPhotos(parsed.idPhotos);
-      if (parsed.lookPhoto) setLookPhoto(parsed.lookPhoto);
+      // lookPhoto is NOT loaded from localStorage to keep it out of persistent memory
     }
   }, []);
 
@@ -571,7 +592,7 @@ export default function App() {
           deepDiveResult: ddRes,
           preferences: prefs,
           idPhotos: photos.idPhotos,
-          lookPhoto: photos.lookPhoto,
+          // lookPhoto and rateResult are NOT saved to persistent storage
           updatedAt: new Date().toISOString()
         }, { merge: true });
       } catch (e) {
@@ -584,7 +605,8 @@ export default function App() {
         if (idRes || ddRes) {
           localStorage.setItem('analysisResult', JSON.stringify({ identityResult: idRes, deepDiveResult: ddRes }));
         }
-        localStorage.setItem('stylesnap_photos', JSON.stringify(photos));
+        // Save only ID photos, not lookPhoto
+        localStorage.setItem('stylesnap_photos', JSON.stringify({ idPhotos: photos.idPhotos }));
       } catch (e) {
         if (e instanceof DOMException && (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED')) {
           localStorage.removeItem('stylesnap_photos');
@@ -625,11 +647,23 @@ export default function App() {
     if (saved) {
       const limit: RateLimit = JSON.parse(saved);
       if (Date.now() - limit.lastReset > RESET_TIME) {
-        return { count: 0, lastReset: Date.now() };
+        // Reset count but keep isFirstTime status (it becomes false after first day)
+        return { 
+          count: 0, 
+          lastReset: Date.now(), 
+          isFirstTime: false, 
+          bonusScans: limit.bonusScans || 0 
+        };
       }
       return limit;
     }
-    return { count: 0, lastReset: Date.now() };
+    // Initial state for brand new user
+    return { count: 0, lastReset: Date.now(), isFirstTime: true, bonusScans: 0 };
+  };
+
+  const getEffectiveLimit = (limit: RateLimit) => {
+    const baseLimit = limit.isFirstTime ? 3 : 1;
+    return baseLimit + (limit.bonusScans || 0);
   };
 
   const incrementLimit = () => {
@@ -677,7 +711,7 @@ export default function App() {
     }
 
     const limit = getRateLimit();
-    if (limit.count >= SCAN_LIMIT) {
+    if (limit.count >= getEffectiveLimit(limit)) {
       setShowOverload(true);
       return;
     }
@@ -800,6 +834,14 @@ Suggest specific 90s details in BOLD PINK CAPS.
   };
 
   const runRateMyLook = async () => {
+    const limit = getRateLimit();
+    const maxScans = getEffectiveLimit(limit);
+    
+    if (limit.count >= maxScans) {
+      setShowOverload(true);
+      return;
+    }
+
     if (!lookPhoto) {
       setError("Babe, show me the look! Upload a photo of your outfit! 👗✨");
       return;
@@ -847,6 +889,7 @@ Suggest specific 90s details in BOLD PINK CAPS.
 
       console.log("Gemini responded to rating.");
       setRateResult(response.text || "System error! 💖");
+      incrementLimit();
     } catch (err: any) {
       console.error("Rating Error:", err);
       setError("System glitch! " + (err.message || "Unknown error"));
@@ -923,8 +966,6 @@ Suggest specific 90s details in BOLD PINK CAPS.
     }
   };
 
-  const limit = getRateLimit();
-
   const handleLogin = async () => {
     if (loggingIn) return;
     setLoggingIn(true);
@@ -946,6 +987,22 @@ Suggest specific 90s details in BOLD PINK CAPS.
       setLoggingIn(false);
     }
   };
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const limit = getRateLimit();
+      const timeLeft = RESET_TIME - (Date.now() - limit.lastReset);
+      if (timeLeft > 0) {
+        const hours = Math.floor(timeLeft / (1000 * 60 * 60));
+        const minutes = Math.floor((timeLeft % (1000 * 60 * 60)) / (1000 * 60));
+        const seconds = Math.floor((timeLeft % (1000 * 60)) / 1000);
+        setCountdown(`${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`);
+      } else {
+        setCountdown('00:00:00');
+      }
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   return (
     <div className="p-4 md:p-8 flex flex-col items-center min-h-screen">
@@ -1196,15 +1253,16 @@ Suggest specific 90s details in BOLD PINK CAPS.
                           setPreferences(e.target.value);
                           saveAppState(e.target.value, identityResult, deepDiveResult, { idPhotos, lookPhoto });
                         }}
-                        placeholder="Tell me your vibe, babe! ✨"
+                        placeholder="Tell me your vibe (e.g., Coquette, Dark Academia, Corporate Chic)..."
                         className="w-full retro-inset h-20 text-sm focus:outline-none resize-none"
                       />
                     </div>
 
                     <div className="flex flex-col items-center gap-4">
+                      <p className="text-[9px] font-bold text-gray-500 mb-1 uppercase tracking-tighter">[PROTECT_MODE]: SCANS ARE VOLATILE & AUTO-DELETED AFTER ANALYSIS.</p>
                       <button 
                         onClick={runAnalyseMe}
-                        disabled={analyzing || limit.count >= SCAN_LIMIT}
+                        disabled={analyzing || idPhotos.some(p => !p) || getRateLimit().count >= getEffectiveLimit(getRateLimit())}
                         className="retro-button w-full max-w-xs flex items-center justify-center gap-2"
                       >
                         {analyzing ? (
@@ -1308,7 +1366,7 @@ Suggest specific 90s details in BOLD PINK CAPS.
 
                         <button 
                           onClick={runRateMyLook}
-                          disabled={analyzing || !lookPhoto}
+                          disabled={analyzing || !lookPhoto || getRateLimit().count >= getEffectiveLimit(getRateLimit())}
                           className="retro-button w-full max-w-xs flex items-center justify-center gap-2"
                         >
                           {analyzing ? (
@@ -1717,7 +1775,7 @@ Suggest specific 90s details in BOLD PINK CAPS.
         {/* Status Bar */}
         <div className="bg-retro-grey border-t-2 border-white px-2 py-1 flex justify-between items-center text-[10px] font-bold text-gray-600">
           <div className="flex gap-4 items-center">
-            <span>SCANS: {limit.count}/{SCAN_LIMIT}</span>
+            <span>SCANS: {getRateLimit().count}/{getEffectiveLimit(getRateLimit())}</span>
             <span className="animate-pulse text-green-600">SYSTEM_READY</span>
             <button 
               onClick={clearAllData}
@@ -1810,27 +1868,39 @@ Suggest specific 90s details in BOLD PINK CAPS.
               <div className="retro-title-bar bg-red-700">
                 <div className="flex items-center gap-2">
                   <AlertTriangle size={14} />
-                  <span>SYSTEM_OVERLOAD.EXE</span>
+                  <span>[❗] SYSTEM ALERT: RATE_ENGINE OVERHEATED</span>
                 </div>
                 <button onClick={() => setShowOverload(false)} className="w-4 h-4 bg-retro-grey border border-gray-600 flex items-center justify-center text-black text-[10px]"><X size={10}/></button>
               </div>
-              <div className="p-8 bg-retro-grey text-center space-y-4">
+              <div className="p-8 bg-retro-grey text-center space-y-6">
                 <div className="text-red-600 flex justify-center">
                   <AlertTriangle size={48} />
                 </div>
-                <h3 className="text-xl font-bold text-dark-blue uppercase tracking-tight">Style Energy Depleted!</h3>
-                <p className="text-sm text-gray-700">
-                  Ugh, babe! You've scanned too many looks today. The Style Engine is literally smoking! 🛑✨
+                <h3 className="text-xl font-bold text-dark-blue uppercase tracking-tight">OMG Bestie, you've used your {getEffectiveLimit(getRateLimit()) === 3 ? '3' : '1'} daily scan! 💅</h3>
+                <p className="text-sm text-gray-700 leading-relaxed">
+                  The AI is literally exhausted from all this main character energy. It needs to recharge its batteries to give you the high-octane sweetness you deserve.
                 </p>
-                <p className="text-xs text-gray-500 italic">
-                  Come back in 24 hours for more iconic fashion magic.
-                </p>
-                <button 
-                  onClick={() => setShowOverload(false)}
-                  className="retro-button w-full"
-                >
-                  OKAY, GOT IT! 🎀
-                </button>
+                
+                <div className="bg-white border-2 border-gray-400 p-4 font-mono">
+                  <p className="text-[10px] text-gray-500 mb-1">⏳ NEXT SCAN UNLOCKS IN:</p>
+                  <p className="text-2xl font-bold text-dark-blue tracking-widest">{countdown}</p>
+                </div>
+
+                <div className="space-y-3">
+                  <p className="text-xs text-gray-600 italic">
+                    Can’t wait? Share your Style ID to your IG Story to help the engine cool down faster! 🚀
+                  </p>
+                  <button 
+                    onClick={() => {
+                      handleShareWishlist();
+                      setShowOverload(false);
+                    }}
+                    className="retro-button w-full flex items-center justify-center gap-2"
+                  >
+                    <Share2 size={18} />
+                    SHARE FOR BONUS SCAN! ✨
+                  </button>
+                </div>
               </div>
             </motion.div>
           </div>
